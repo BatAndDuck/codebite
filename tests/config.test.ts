@@ -60,16 +60,19 @@ describe('configSchema', () => {
     });
     expect(result.maxSteps).toBe(30);
     expect(result.deepMode).toBe(false);
+    expect(result.tools).toEqual({});
   });
 
-  it('accepts optional tavilyApiKey', () => {
+  it('accepts optional nested tool config', () => {
     const result = configSchema.parse({
       provider: 'openai',
       model: 'gpt-4o',
       apiKey: 'sk-test',
-      tavilyApiKey: 'tvly-xxx',
+      tools: {
+        tavilyApiKey: 'tvly-xxx',
+      },
     });
-    expect(result.tavilyApiKey).toBe('tvly-xxx');
+    expect(result.tools.tavilyApiKey).toBe('tvly-xxx');
   });
 
   it('rejects maxSteps out of range', () => {
@@ -91,6 +94,8 @@ describe('loadConfig', () => {
   });
 
   afterEach(() => {
+    delete process.env.CODEBITE_API_KEY;
+    delete process.env.CONTEXT7_API_KEY;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -138,6 +143,64 @@ describe('loadConfig', () => {
     );
     expect(() => loadConfig(tempDir)).toThrow('Invalid .codebite.json');
   });
+
+  it('reads CONTEXT7_API_KEY from the environment', () => {
+    process.env.CONTEXT7_API_KEY = 'ctx7-test';
+    writeFileSync(
+      join(tempDir, '.codebite.json'),
+      JSON.stringify({
+        provider: 'openai',
+        model: 'gpt-4o',
+        apiKey: 'sk-test',
+      })
+    );
+
+    const config = loadConfig(tempDir);
+    expect(config.tools.context7ApiKey).toBe('ctx7-test');
+  });
+
+  it('supports backward-compatible top-level tool keys', () => {
+    writeFileSync(
+      join(tempDir, '.codebite.json'),
+      JSON.stringify({
+        provider: 'openai',
+        model: 'gpt-4o',
+        apiKey: 'sk-test',
+        tavilyApiKey: 'tvly-test',
+        context7ApiKey: 'ctx7-test',
+      })
+    );
+
+    const config = loadConfig(tempDir);
+    expect(config.tools.tavilyApiKey).toBe('tvly-test');
+    expect(config.tools.context7ApiKey).toBe('ctx7-test');
+  });
+
+  it('deep-merges nested tool config from local overrides', () => {
+    writeFileSync(
+      join(tempDir, '.codebite.json'),
+      JSON.stringify({
+        provider: 'openai',
+        model: 'gpt-4o',
+        apiKey: 'sk-test',
+        tools: {
+          tavilyApiKey: 'tvly-base',
+        },
+      })
+    );
+    writeFileSync(
+      join(tempDir, '.codebite.local.json'),
+      JSON.stringify({
+        tools: {
+          context7ApiKey: 'ctx7-local',
+        },
+      })
+    );
+
+    const config = loadConfig(tempDir);
+    expect(config.tools.tavilyApiKey).toBe('tvly-base');
+    expect(config.tools.context7ApiKey).toBe('ctx7-local');
+  });
 });
 
 describe('saveConfig', () => {
@@ -163,6 +226,7 @@ describe('saveConfig', () => {
     const raw = JSON.parse(readFileSync(join(tempDir, '.codebite.json'), 'utf-8'));
     expect(raw.provider).toBe('anthropic');
     expect(raw.model).toBe('claude-haiku-4-5');
+    expect(raw.tools).toBeUndefined();
   });
 
   it('saves vercel provider', () => {
@@ -180,5 +244,27 @@ describe('saveConfig', () => {
       tempDir
     );
     expect(config.maxSteps).toBe(50);
+  });
+
+  it('saves nested tool config', () => {
+    const config = saveConfig(
+      {
+        provider: 'openai',
+        model: 'gpt-4o',
+        apiKey: 'sk-test',
+        tools: {
+          tavilyApiKey: 'tvly-test',
+          context7ApiKey: 'ctx7-test',
+        },
+      },
+      tempDir
+    );
+
+    expect(config.tools.tavilyApiKey).toBe('tvly-test');
+    expect(config.tools.context7ApiKey).toBe('ctx7-test');
+
+    const raw = JSON.parse(readFileSync(join(tempDir, '.codebite.json'), 'utf-8'));
+    expect(raw.tools.tavilyApiKey).toBe('tvly-test');
+    expect(raw.tools.context7ApiKey).toBe('ctx7-test');
   });
 });

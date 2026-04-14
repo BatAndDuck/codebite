@@ -1,10 +1,16 @@
-import { generateText, stepCountIs, type LanguageModel } from 'ai';
+import { generateText, stepCountIs, type LanguageModel, type ModelMessage } from 'ai';
 import type { CodebiteConfig } from './config.js';
 import { getAllTools } from './tools/index.js';
 import { buildSystemPrompt } from './prompts/system.js';
+import { buildExecutionPrompt } from './prompts/execution.js';
 import { resolveEmbeddingModel } from './provider.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { getRepositoryStructure } from './utils/project-structure.js';
+import {
+  createContextDiagnosisLogger,
+  type StepInputSnapshot,
+} from './utils/context-diagnosis.js';
 
 export interface ToolCallInfo {
   toolName: string;
@@ -26,11 +32,14 @@ export interface RunAgentOptions {
   model: LanguageModel;
   question: string;
   config: CodebiteConfig;
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  contextDiagnosisPath?: string;
+  activeChatId?: string | null;
   onStep?: (step: AgentStepInfo) => void;
 }
 
 export async function runAgent(options: RunAgentOptions): Promise<string> {
-  const { model, question, config, onStep } = options;
+  const { model, question, config, history = [], contextDiagnosisPath, activeChatId, onStep } = options;
 
   // Provide embedding model for semantic search when index exists
   const indexExists =
@@ -47,45 +56,117 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
   }
 
   const tools = getAllTools(config, embeddingModel);
-  const systemPrompt = buildSystemPrompt(config);
+  const projectStructure = getRepositoryStructure();
+  const systemPrompt = buildSystemPrompt(config, projectStructure, question);
+  const executionPrompt = buildExecutionPrompt(question);
+  const conversation: ModelMessage[] = [
+    ...history.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    {
+      role: 'user',
+      content: executionPrompt,
+    },
+  ];
 
-  let stepNumber = 0;
+  const stepInputs = new Map<number, StepInputSnapshot & { startedAtMs: number }>();
+  const diagnosisLogger = contextDiagnosisPath
+    ? createContextDiagnosisLogger(contextDiagnosisPath)
+    : undefined;
+
+  diagnosisLogger?.writeRunStart({
+    timestamp: new Date().toISOString(),
+    question,
+    executionPrompt,
+    activeChatId: activeChatId ?? null,
+    historyMessages: history.length,
+    systemPrompt,
+    initialMessages: conversation,
+    repositoryStructure: projectStructure,
+  });
 
   const result = await generateText({
     model,
     system: systemPrompt,
-    prompt: question,
+    messages: conversation,
     tools,
     stopWhen: stepCountIs(config.maxSteps),
     toolChoice: 'auto',
+    experimental_onStepStart: (event) => {
+      stepInputs.set(event.stepNumber, {
+        stepNumber: event.stepNumber + 1,
+        startedAt: new Date().toISOString(),
+        startedAtMs: Date.now(),
+        system: event.system,
+        messages: event.messages,
+        activeTools: event.activeTools?.map((toolName) => String(toolName)),
+        toolChoice: event.toolChoice,
+      });
+    },
     onStepFinish: (event) => {
+      const stepInput = stepInputs.get(event.stepNumber);
+      const durationMs = stepInput ? Date.now() - stepInput.startedAtMs : 0;
+
+      const toolCalls: ToolCallInfo[] = (event.toolCalls ?? []).map((tc: any) => {
+        const matchingResult: any = (event.toolResults ?? []).find(
+          (tr: any) => tr.toolCallId === tc.toolCallId
+        );
+        return {
+          toolName: tc.toolName as string,
+          args: tc.input ?? {},
+          result: matchingResult?.output ?? matchingResult?.error ?? undefined,
+        };
+      });
+
+      const usage = event.usage ?? { inputTokens: 0, outputTokens: 0 };
+
+      diagnosisLogger?.writeStep({
+        timestamp: new Date().toISOString(),
+        stepNumber: event.stepNumber + 1,
+        finishReason: event.finishReason,
+        usage: {
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          totalTokens: usage.totalTokens ?? 0,
+        },
+        inputContext: stepInput
+          ? {
+              startedAt: stepInput.startedAt,
+              system: stepInput.system,
+              messages: stepInput.messages,
+              activeTools: stepInput.activeTools,
+              toolChoice: stepInput.toolChoice,
+            }
+          : undefined,
+        output: {
+          text: event.text,
+          toolCalls: event.toolCalls,
+          toolResults: event.toolResults,
+          responseMessages: event.response?.messages,
+        },
+      });
+
       if (onStep) {
-        stepNumber += 1;
-        const stepStartMs = Date.now();
-
-        const toolCalls: ToolCallInfo[] = (event.toolCalls ?? []).map((tc: any) => {
-          const matchingResult = (event.toolResults ?? []).find(
-            (tr: any) => tr.toolCallId === tc.toolCallId
-          );
-          return {
-            toolName: tc.toolName as string,
-            args: tc.input ?? {},
-            result: matchingResult?.output ?? undefined,
-          };
-        });
-
-        const usage = event.usage ?? { inputTokens: 0, outputTokens: 0 };
-
         onStep({
-          stepNumber,
+          stepNumber: event.stepNumber + 1,
           toolCalls,
           usage: {
             inputTokens: usage.inputTokens ?? 0,
             outputTokens: usage.outputTokens ?? 0,
           },
-          durationMs: Date.now() - stepStartMs,
+          durationMs,
         });
       }
+    },
+    onFinish: (event) => {
+      diagnosisLogger?.writeRunFinish({
+        timestamp: new Date().toISOString(),
+        stepCount: event.steps.length,
+        totalUsage: event.totalUsage,
+        finishReason: event.finishReason,
+        finalText: event.text,
+      });
     },
   });
 

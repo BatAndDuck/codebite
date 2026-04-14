@@ -5,6 +5,14 @@ import { saveConfig, loadConfig } from './config.js';
 import { resolveModel } from './provider.js';
 import { runAgent, type AgentStepInfo } from './agent.js';
 import { buildIndex } from './indexer/index.js';
+import {
+  appendChatTurn,
+  createChat,
+  getActiveChat,
+  listChats,
+  restoreChat,
+} from './chat.js';
+import { join } from 'node:path';
 
 const program = new Command();
 
@@ -26,6 +34,7 @@ program
   )
   .requiredOption('--apikey <key>', 'API key for the LLM provider')
   .option('--tavily-key <key>', 'Tavily API key for web search')
+  .option('--context7-key <key>', 'Context7 API key for documentation lookup via MCP')
   .option('--max-steps <n>', 'Maximum agent steps', '30')
   .option('--deep', 'Enable deep mode by default', false)
   .action(async (opts) => {
@@ -63,7 +72,10 @@ program
         apiKey: opts.apikey,
         maxSteps: parseInt(opts.maxSteps, 10),
         deepMode: opts.deep,
-        tavilyApiKey: opts.tavilyKey,
+        tools: {
+          tavilyApiKey: opts.tavilyKey,
+          context7ApiKey: opts.context7Key,
+        },
       });
 
       console.log(chalk.green('✓') + ' Configuration saved to .codebite.json');
@@ -71,7 +83,8 @@ program
       console.log(chalk.dim(`  Model:    ${config.model}`));
       console.log(chalk.dim(`  Steps:    ${config.maxSteps}`));
       console.log(chalk.dim(`  Deep:     ${config.deepMode}`));
-      if (config.tavilyApiKey) console.log(chalk.dim('  Search:   enabled'));
+      if (config.tools.tavilyApiKey) console.log(chalk.dim('  Search:   enabled'));
+      if (config.tools.context7ApiKey) console.log(chalk.dim('  Context7: enabled'));
       console.log(chalk.dim('\nRun "codebite index" to analyze and index your codebase.'));
     } catch (err: any) {
       console.error(chalk.red('Error:'), err.message);
@@ -146,6 +159,9 @@ function summarizeArgs(toolName: string, args: Record<string, unknown>): string 
     dependency_analysis: 'path',
     semantic_search: 'query',
     web_search: 'query',
+    context7_docs: 'query',
+    read_file_chunk: 'path',
+    folder_children: 'path',
   };
   const key = primary[toolName];
   if (key && args[key] !== undefined) {
@@ -191,23 +207,45 @@ program
   .argument('<question>', 'Your question about the codebase')
   .option('--deep', 'Enable deep analysis mode')
   .option('--max-steps <n>', 'Override max steps for this query')
+  .option(
+    '--context-diagnosis [path]',
+    'Write per-step context snapshots to a JSONL file (default under .codebite/context-diagnosis/)'
+  )
   .action(async (question, opts) => {
     try {
       const config = loadConfig();
       const model = resolveModel(config);
       const maxSteps = opts.maxSteps ? parseInt(opts.maxSteps, 10) : config.maxSteps;
       const deepMode = opts.deep ?? config.deepMode;
+      const activeChat = getActiveChat();
+      const diagnosisPath = resolveContextDiagnosisPath(opts.contextDiagnosis, activeChat?.id);
 
       console.log(chalk.bold.cyan('codebite') + ' — ' + chalk.dim(question));
       console.log(chalk.dim(`Provider: ${config.provider}  Model: ${config.model}  Max steps: ${maxSteps}${deepMode ? '  [deep mode]' : ''}`));
+      if (activeChat) {
+        console.log(chalk.dim(`Chat: ${activeChat.name} (${activeChat.messages.length} saved messages)`));
+      }
+      if (diagnosisPath) {
+        console.log(chalk.dim(`Context diagnosis: ${diagnosisPath}`));
+      }
       console.log(chalk.dim('─'.repeat(60)));
 
       const answer = await runAgent({
         model,
         question,
+        history: activeChat?.messages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
         config: { ...config, maxSteps, deepMode },
+        activeChatId: activeChat?.id ?? null,
+        contextDiagnosisPath: diagnosisPath,
         onStep: printStep,
       });
+
+      if (activeChat) {
+        appendChatTurn(activeChat.id, question, answer);
+      }
 
       console.log(chalk.dim('─'.repeat(60)));
       console.log('\n' + answer);
@@ -216,5 +254,80 @@ program
       process.exit(1);
     }
   });
+
+// ---------------------------------------------------------------------------
+// chat management
+// ---------------------------------------------------------------------------
+program
+  .command('new')
+  .description('Create a new chat and make it the active conversation')
+  .argument('[name]', 'Optional chat name')
+  .action((name) => {
+    try {
+      const chat = createChat(name);
+      console.log(chalk.green('✓') + ` Active chat: ${chat.name}`);
+      console.log(chalk.dim(`  id: ${chat.id}`));
+    } catch (err: any) {
+      console.error(chalk.red('Error:'), err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('restore')
+  .alias('resture')
+  .description('Restore an existing chat and make it active')
+  .argument('<name>', 'Chat name or chat id')
+  .action((name) => {
+    try {
+      const chat = restoreChat(name);
+      console.log(chalk.green('✓') + ` Active chat: ${chat.name}`);
+      console.log(chalk.dim(`  id: ${chat.id}`));
+      console.log(chalk.dim(`  saved messages: ${chat.messages.length}`));
+    } catch (err: any) {
+      console.error(chalk.red('Error:'), err.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('list')
+  .description('List saved chats for this project')
+  .action(() => {
+    try {
+      const chats = listChats();
+      if (chats.length === 0) {
+        console.log(chalk.dim('No saved chats.'));
+        return;
+      }
+
+      for (const chat of chats) {
+        const marker = chat.active ? chalk.green('●') : chalk.dim('○');
+        const label = chat.active ? chalk.bold(chat.name) : chat.name;
+        console.log(
+          `${marker} ${label} ${chalk.dim(`(${chat.id})  messages: ${chat.messageCount}  updated: ${chat.updatedAt}`)}`
+        );
+      }
+    } catch (err: any) {
+      console.error(chalk.red('Error:'), err.message);
+      process.exit(1);
+    }
+  });
+
+function resolveContextDiagnosisPath(
+  option: string | boolean | undefined,
+  activeChatId?: string
+): string | undefined {
+  if (!option) return undefined;
+  if (typeof option === 'string') return option;
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .replace('T', '-')
+    .replace('Z', '');
+  const fileName = `${activeChatId ?? 'adhoc'}-${timestamp}.jsonl`;
+  return join('.codebite', 'context-diagnosis', fileName);
+}
 
 program.parse();

@@ -9,9 +9,10 @@ All LLM calls go through the [Vercel AI SDK](https://sdk.vercel.ai/docs) regardl
 - **Multi-provider LLM support** — OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway
 - **Smart agentic loop** — agent takes as many steps as needed, uses tools in parallel
 - **Deep indexing** — LLM analyzes each file to build a rich semantic index (not raw embeddings)
-- **10 built-in tools** — file reading, glob/grep/regex search, directory tree, dependency analysis, git history, semantic search, web search
+- **Built-in analysis tools** — chunked file reads, child-folder inspection, dependency analysis, git history, semantic search, web search, and Context7 docs lookup
+- **Persistent chats** — create, restore, and list project-local conversations under `.codebite/`
 - **Deep mode** — exhaustive multi-angle exploration for complex questions
-- **Context-optimized** — agent summarizes findings, never floods context with raw file contents
+- **Context-optimized** — agent starts with the top-level tree, reads file chunks when needed, and can emit per-step context diagnosis logs
 - **Technology agnostic** — works with any language and any project structure
 
 ## Installation
@@ -32,10 +33,10 @@ npx codebite <command>
 # 1. Go to any project
 cd /path/to/your-project
 
-# 2. Initialize (without API key — store it in .codebite.local.json instead)
-codebite init --provider vercel --model openai/gpt-4o-mini
+# 2. Initialize
+codebite init --provider vercel --model openai/gpt-4o-mini --apikey vck_your-key-here
 
-# 3. Add your API key to the local config (never committed)
+# 3. Or move the API key into local config after init (never committed)
 echo '{ "apiKey": "vck_your-key-here" }' > .codebite.local.json
 
 # 4. Index the codebase (optional but recommended for semantic search)
@@ -59,7 +60,7 @@ Create `.codebite.local.json` in your project root (it is gitignored automatical
 }
 ```
 
-This file overrides any field in `.codebite.json`, so you can also use it to override other settings locally (e.g. switch models without touching the committed config).
+This file overrides any field in `.codebite.json`, so you can also use it to override other settings locally (e.g. switch models without touching the committed config). It is used by all commands that load config, including `codebite index` and `codebite ask`.
 
 ### Environment variable — `CODEBITE_API_KEY`
 
@@ -121,7 +122,10 @@ Local overrides go in `.codebite.local.json` (gitignored):
 ```json
 {
   "apiKey": "vck_your-api-key-here",
-  "tavilyApiKey": "tvly-your-tavily-key"
+  "tools": {
+    "tavilyApiKey": "tvly-your-tavily-key",
+    "context7ApiKey": "ctx7-your-key"
+  }
 }
 ```
 
@@ -132,9 +136,10 @@ Local overrides go in `.codebite.local.json` (gitignored):
 | `apiKey` | Yes* | — | API key — use `.codebite.local.json` or `CODEBITE_API_KEY` |
 | `maxSteps` | No | `30` | Max agent steps per query (1–200) |
 | `deepMode` | No | `false` | Enable deep mode globally |
-| `tavilyApiKey` | No | — | [Tavily](https://tavily.com) key for web search |
+| `tools.tavilyApiKey` | No | — | [Tavily](https://tavily.com) key for web search |
+| `tools.context7ApiKey` | No | — | Context7 key for MCP-backed documentation lookup |
 
-*`apiKey` must be provided via `.codebite.local.json` or `CODEBITE_API_KEY` env var.
+*`apiKey` must be provided via `.codebite.local.json` or `CODEBITE_API_KEY` env var. `tools.context7ApiKey` can also come from `CONTEXT7_API_KEY`.
 
 ## CLI Reference
 
@@ -146,6 +151,7 @@ codebite init \
   --model gpt-4o \          # model ID
   [--apikey sk-...] \       # LLM API key (prefer .codebite.local.json instead)
   [--tavily-key tvly-...] \ # optional: enable web search
+  [--context7-key ctx7-...] \ # optional: enable Context7 MCP docs lookup
   [--max-steps 50] \        # optional: override default 30
   [--deep]                  # optional: enable deep mode globally
 ```
@@ -165,6 +171,8 @@ Analyzes every source file with the LLM and builds a semantic index in `.codebit
 codebite index
 ```
 
+`codebite index` reads config the same way as `ask`, so putting `apiKey` in `.codebite.local.json` is supported.
+
 How it works:
 1. Scans all files (respects `.gitignore`, skips binaries and files >100 KB)
 2. LLM analyzes each file → produces purpose, summary, exports, dependencies
@@ -179,6 +187,57 @@ How it works:
 codebite ask "your question"
 codebite ask --deep "exhaustive analysis question"
 codebite ask --max-steps 60 "complex question on large codebase"
+codebite ask --context-diagnosis "trace this investigation"
+```
+
+If an active chat exists, `ask` continues that conversation automatically and persists the new turn.
+
+Typical flow after creating or restoring a chat:
+
+```bash
+# Start or restore a chat first
+codebite new "auth-review"
+# or: codebite restore "auth-review"
+
+# Normal follow-up turns
+codebite ask "Where is authentication implemented?"
+codebite ask "Now explain the token validation path"
+
+# Deep-mode follow-up turn in the same chat
+codebite ask --deep "Give me an exhaustive auth flow analysis"
+
+# Back to normal mode in the same chat
+codebite ask "Summarize the auth risks in 5 bullets"
+```
+
+Each `ask` command appends to the currently active chat, so the agent keeps the earlier conversation context. `--deep` changes only that one turn unless deep mode is enabled globally in config.
+
+### `codebite new`
+
+Create a new persistent chat and make it active:
+
+```bash
+codebite new
+codebite new "auth-review"
+```
+
+If you omit the name, the chat starts as `Untitled chat` and is automatically renamed from the first user message, capped at 100 characters. After `codebite new`, start talking with that chat by using `codebite ask ...`. You do not need a separate chat command for each reply.
+
+### `codebite restore`
+
+Restore an existing chat by name or id:
+
+```bash
+codebite restore "auth-review"
+codebite resture "auth-review"   # typo-compatible alias
+```
+
+### `codebite list`
+
+List saved chats for the current project:
+
+```bash
+codebite list
 ```
 
 ## Example Questions
@@ -224,7 +283,9 @@ codebite ask --deep "Explain the full request-response cycle"
 
 The agent handles large projects automatically:
 - Uses `glob_search` + `grep_search` to narrow scope before reading files
-- Reads files in 500-line chunks with offset/limit navigation
+- Starts with the root tree up to 2 levels deep already in context
+- Reads files in focused chunks with `read_file_chunk` or `read_file` offset/limit navigation
+- Uses `folder_children` for one-level folder inspection without recursive noise
 - Uses `semantic_search` to jump to relevant files by concept
 - Summarizes findings progressively — never holds entire files in context
 
@@ -239,16 +300,19 @@ codebite ask --max-steps 80 "Explain the entire auth system"
 | Tool | What it does |
 |------|-------------|
 | `read_file` | Read file contents with line numbers, offset and limit |
+| `read_file_chunk` | Read a smaller targeted slice of a file for tighter context control |
 | `glob_search` | Find files by pattern (`**/*.ts`, `src/**/*.test.js`) |
 | `grep_search` | Search file contents by text or regex with surrounding context |
 | `directory_tree` | Show project structure (respects `.gitignore`) |
-| `list_directory` | List files and folders in a directory |
+| `list_directory` | List direct child files and folders in a directory |
+| `folder_children` | Alias focused on one-level folder structure only |
 | `file_stats` | File size, line count, language detection |
 | `get_cwd` | Get project root path |
 | `shell_command` | Read-only git commands (`git log`, `git blame`, `git diff`, …) |
 | `dependency_analysis` | Parse `package.json`, `go.mod`, `Cargo.toml`, `requirements.txt`, … |
 | `semantic_search` | Find files by semantic meaning (requires `codebite index`) |
 | `web_search` | Search the web for docs and library info (requires Tavily key) |
+| `context7_docs` | Query up-to-date docs via Context7 MCP (requires Context7 key) |
 
 The agent calls tools in **parallel when independent** — a native feature of the Vercel AI SDK.
 
@@ -260,6 +324,7 @@ npm run build          # tsc → dist/
 npm test               # vitest run (unit tests only)
 npm run test:e2e       # integration tests (requires VERCEL_API_KEY)
 npm run test:watch     # watch mode
+npm link               # optional: point the global `codebite` command at this checkout
 
 # Run without building (dev mode)
 npx tsx src/cli.ts ask "What is this project?"
@@ -276,6 +341,15 @@ Create `.codebite.local.json` in the project root (it is gitignored):
 ```
 
 This file is merged on top of `.codebite.json` at runtime. You can also override any other config field here.
+
+### Troubleshooting local config
+
+If `codebite` says `apiKey` is missing even though `.codebite.local.json` exists:
+
+- Confirm you are running the expected binary with `Get-Command codebite` in PowerShell.
+- A stale global install can point to an older package version that does not match your local checkout.
+- From this repo, `npm link` will repoint the global `codebite` command at the current source tree.
+- As a fallback during development, run `node .\\dist\\cli.js <command>` or `npx tsx src/cli.ts <command>` from the repo root.
 
 ## CI / CD
 

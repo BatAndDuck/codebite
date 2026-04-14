@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { isBinaryFile, detectLanguage } from '../utils/language-detect.js';
 import { truncateLines } from '../utils/truncate.js';
+import { createGitignoreFilter, isIgnored } from '../utils/gitignore.js';
 
 export const readFileTool = tool({
   description:
@@ -27,11 +28,17 @@ export const readFileTool = tool({
       .describe('Max lines to read (default 500, max 1000)'),
   }),
   execute: async ({ path: filePath, offset, limit }) => {
-    const absPath = resolve(process.cwd(), filePath);
-    const relPath = relative(process.cwd(), absPath);
+    const cwd = process.cwd();
+    const absPath = resolve(cwd, filePath);
+    const relPath = relative(cwd, absPath);
+    const ig = createGitignoreFilter(cwd);
 
     if (relPath.startsWith('..')) {
       return { error: 'Cannot read files outside the project directory.' };
+    }
+
+    if (isIgnored(ig, absPath, cwd)) {
+      return { error: `Cannot read ignored file: ${filePath}` };
     }
 
     if (!existsSync(absPath)) {

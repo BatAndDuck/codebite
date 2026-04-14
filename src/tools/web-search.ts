@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { tavily } from '@tavily/core';
 
-export function createWebSearchTool(tavilyApiKey: string) {
+export function createWebSearchTool(tavilyApiKey?: string) {
   return tool({
     description:
       'Search the web for documentation, API references, library versions, best practices, and technical information. Use when you need external context about libraries, frameworks, or tools used in the project.',
@@ -19,6 +19,13 @@ export function createWebSearchTool(tavilyApiKey: string) {
     }),
     execute: async ({ query, maxResults }) => {
       try {
+        if (!tavilyApiKey) {
+          return {
+            error:
+              'Web search is not configured. Set tools.tavilyApiKey in .codebite.local.json to enable external web search.',
+          };
+        }
+
         const client = tavily({ apiKey: tavilyApiKey });
         const response = await client.search(query, {
           maxResults,

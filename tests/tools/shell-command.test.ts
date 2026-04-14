@@ -23,6 +23,16 @@ describe('isCommandAllowed', () => {
     expect(isCommandAllowed('git ls-files')).toBe(true);
   });
 
+  it('allows npm outdated', () => {
+    expect(isCommandAllowed('npm outdated')).toBe(true);
+    expect(isCommandAllowed('npm outdated --json')).toBe(true);
+  });
+
+  it('allows npm show and npm view', () => {
+    expect(isCommandAllowed('npm show zod version')).toBe(true);
+    expect(isCommandAllowed('npm view chalk version')).toBe(true);
+  });
+
   it('allows wc', () => {
     expect(isCommandAllowed('wc -l src/index.ts')).toBe(true);
   });
@@ -37,6 +47,10 @@ describe('isCommandAllowed', () => {
 
   it('rejects npm install', () => {
     expect(isCommandAllowed('npm install malicious-pkg')).toBe(false);
+  });
+
+  it('rejects npm publish', () => {
+    expect(isCommandAllowed('npm publish')).toBe(false);
   });
 
   it('rejects git push', () => {

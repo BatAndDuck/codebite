@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { detectLanguage, isBinaryFile } from '../utils/language-detect.js';
+import { createGitignoreFilter, isIgnored } from '../utils/gitignore.js';
 
 export const fileStatsTool = tool({
   description:
@@ -14,9 +15,14 @@ export const fileStatsTool = tool({
     const cwd = process.cwd();
     const absPath = resolve(cwd, filePath);
     const rel = relative(cwd, absPath);
+    const ig = createGitignoreFilter(cwd);
 
     if (rel.startsWith('..')) {
       return { error: 'Cannot access files outside the project directory.' };
+    }
+
+    if (isIgnored(ig, absPath, cwd)) {
+      return { error: `Cannot access ignored file: ${filePath}` };
     }
 
     if (!existsSync(absPath)) {

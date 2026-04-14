@@ -2,10 +2,11 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { createGitignoreFilter } from '../utils/gitignore.js';
 
 export const listDirectoryTool = tool({
   description:
-    'List files and folders in a specific directory (non-recursive). Shows type and size.',
+    'List only the immediate child files and folders in a specific directory (non-recursive). Shows type and size.',
   inputSchema: z.object({
     path: z
       .string()
@@ -17,13 +18,17 @@ export const listDirectoryTool = tool({
     const cwd = process.cwd();
     const absPath = resolve(cwd, dirPath);
     const rel = relative(cwd, absPath);
+    const ig = createGitignoreFilter(cwd);
 
     if (rel.startsWith('..')) {
       return { error: 'Cannot list directories outside the project.' };
     }
 
     try {
-      const entries = readdirSync(absPath, { withFileTypes: true });
+      const entries = readdirSync(absPath, { withFileTypes: true }).filter((entry) => {
+        const entryRel = rel && rel !== '.' ? `${rel}/${entry.name}` : entry.name;
+        return !ig.ignores(entryRel) && !ig.ignores(entryRel + '/');
+      });
 
       const items = entries.map((entry) => {
         const fullPath = join(absPath, entry.name);
