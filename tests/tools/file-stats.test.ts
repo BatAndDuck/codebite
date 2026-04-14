@@ -57,4 +57,11 @@ describe('fileStatsTool', () => {
     const result = await fileStatsTool.execute!({ path: 'small.txt' }, {} as any) as any;
     expect(result.sizeHuman).toBe('5B');
   });
+
+  it('rejects ignored files', async () => {
+    writeFileSync(join(tempDir, '.gitignore'), 'secret.txt\n');
+    writeFileSync(join(tempDir, 'secret.txt'), 'top secret');
+    const result = await fileStatsTool.execute!({ path: 'secret.txt' }, {} as any) as any;
+    expect(result.error).toContain('ignored');
+  });
 });

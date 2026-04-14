@@ -6,7 +6,7 @@ import { buildExecutionPrompt } from './prompts/execution.js';
 import { resolveEmbeddingModel } from './provider.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { getTopLevelStructure } from './utils/project-structure.js';
+import { getRepositoryStructure } from './utils/project-structure.js';
 import {
   createContextDiagnosisLogger,
   type StepInputSnapshot,
@@ -56,8 +56,8 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
   }
 
   const tools = getAllTools(config, embeddingModel);
-  const projectStructure = getTopLevelStructure(2);
-  const systemPrompt = buildSystemPrompt(config, projectStructure);
+  const projectStructure = getRepositoryStructure();
+  const systemPrompt = buildSystemPrompt(config, projectStructure, question);
   const executionPrompt = buildExecutionPrompt(question);
   const conversation: ModelMessage[] = [
     ...history.map((message) => ({
@@ -83,7 +83,7 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
     historyMessages: history.length,
     systemPrompt,
     initialMessages: conversation,
-    topLevelStructure: projectStructure,
+    repositoryStructure: projectStructure,
   });
 
   const result = await generateText({

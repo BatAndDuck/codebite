@@ -14,12 +14,14 @@ const baseConfig: CodebiteConfig = {
 
 describe('buildSystemPrompt', () => {
   it('includes autonomy and fallback guidance', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Inspect the repo');
 
     expect(prompt).toContain('Finish the task without bouncing it back');
     expect(prompt).toContain('Do not ask optional follow-ups');
     expect(prompt).toContain('Try a fallback path');
     expect(prompt).toContain('Handle every part of multi-part requests');
+    expect(prompt).toContain('Full Repository Structure');
+    expect(prompt).toContain('Initial User Request');
   });
 
   it('includes documentation workflow guidance when context7 is configured', () => {
@@ -30,7 +32,8 @@ describe('buildSystemPrompt', () => {
           context7ApiKey: 'ctx7-test',
         },
       },
-      '├── src/\n└── tests/'
+      '├── src/\n└── tests/',
+      'Inspect the repo'
     );
 
     expect(prompt).toContain('Use docs before concluding');

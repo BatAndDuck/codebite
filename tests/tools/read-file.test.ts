@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readFileTool } from '../../src/tools/read-file.js';
@@ -64,5 +64,12 @@ describe('readFileTool', () => {
     writeFileSync(join(tempDir, 'app.ts'), 'export const x = 1;');
     const result = await readFileTool.execute!({ path: 'app.ts', offset: 0, limit: 500 }, {} as any) as any;
     expect(result.language).toBe('TypeScript');
+  });
+
+  it('rejects ignored files', async () => {
+    writeFileSync(join(tempDir, '.gitignore'), 'secret.txt\n');
+    writeFileSync(join(tempDir, 'secret.txt'), 'top secret');
+    const result = await readFileTool.execute!({ path: 'secret.txt', offset: 0, limit: 500 }, {} as any) as any;
+    expect(result.error).toContain('ignored');
   });
 });

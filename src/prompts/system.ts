@@ -3,7 +3,8 @@ import { getDeepModeInstructions } from './deep-mode.js';
 
 export function buildSystemPrompt(
   config: CodebiteConfig,
-  projectStructure?: string
+  projectStructure?: string,
+  initialQuestion?: string
 ): string {
   const docsToolsSection = [
     config.tools.context7ApiKey
@@ -20,7 +21,7 @@ export function buildSystemPrompt(
 
 ## Exploration Strategy
 
-1. **Start with structure**: You already know the project root structure shown below. Use directory_tree only when you need deeper recursion beyond that initial map, and use folder_children for a quick one-level view of a specific folder.
+1. **Start with structure**: You already know the full repository structure shown below. Use directory_tree only when you need a refreshed or narrowed recursive view, and use folder_children for a quick one-level view of a specific folder.
 2. **Identify the stack**: Look for manifest files (package.json, Cargo.toml, go.mod, requirements.txt, pyproject.toml) using dependency_analysis to understand technologies used.
 3. **Search before reading**: Use glob_search and grep_search to find relevant files before reading them. Don't read files blindly.
 4. **Read strategically**: For large files, check file_stats first, then read focused sections with read_file_chunk or read_file using offset and limit. Never read large files wholesale when a chunk will do.
@@ -75,13 +76,17 @@ export function buildSystemPrompt(
 - shell_command: Restricted to approved read-only commands such as "git log --oneline -20", "git blame <file>", "npm outdated", and "npm show <pkg> version"
 - dependency_analysis: "list-deps" for project dependencies, "trace-imports" for file-level imports${docsToolsSection ? `\n${docsToolsSection}` : ''}`;
 
+  const initialQuestionSection = initialQuestion
+    ? `\n\n## Initial User Request\n\n${initialQuestion}`
+    : '';
+
   const projectStructureSection = projectStructure
-    ? `\n\n## Initial Project Structure\n\nThis is the root folder structure up to 2 levels deep. Use it as your starting map instead of spending a step discovering the basics.\n\n${projectStructure}`
+    ? `\n\n## Full Repository Structure\n\nThis is the full repository folder and file structure available at the start of the run. Use it as your starting map instead of spending steps rediscovering the repo layout.\n\n${projectStructure}`
     : '';
 
   if (config.deepMode) {
-    return base + projectStructureSection + '\n\n' + getDeepModeInstructions();
+    return base + initialQuestionSection + projectStructureSection + '\n\n' + getDeepModeInstructions();
   }
 
-  return base + projectStructureSection;
+  return base + initialQuestionSection + projectStructureSection;
 }

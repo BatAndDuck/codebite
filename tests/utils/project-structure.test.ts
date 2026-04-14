@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   getDirectorySnapshot,
-  getTopLevelStructure,
+  getRepositoryStructure,
 } from '../../src/utils/project-structure.js';
 
 describe('project structure snapshots', () => {
@@ -42,11 +42,11 @@ describe('project structure snapshots', () => {
     expect(result.tree).toContain('utils/');
   });
 
-  it('returns top-level structure up to two levels deep', () => {
-    const result = getTopLevelStructure(2);
+  it('returns the full repository structure by default', () => {
+    const result = getRepositoryStructure();
 
     expect(result).toContain('src/');
     expect(result).toContain('utils/');
-    expect(result).not.toContain('helper.ts');
+    expect(result).toContain('helper.ts');
   });
 });

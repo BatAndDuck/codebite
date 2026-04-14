@@ -28,7 +28,7 @@ export function getDirectorySnapshot(options: DirectorySnapshotOptions = {}): Di
   const dirPath = options.path ?? '.';
   const maxDepth = options.maxDepth ?? 4;
   const includeFiles = options.includeFiles ?? true;
-  const maxEntries = options.maxEntries ?? 200;
+  const maxEntries = options.maxEntries;
 
   const absPath = resolve(cwd, dirPath);
   const relPath = relative(cwd, absPath);
@@ -41,7 +41,7 @@ export function getDirectorySnapshot(options: DirectorySnapshotOptions = {}): Di
   let entryCount = 0;
 
   function buildTree(dir: string, depth: number): TreeEntry[] {
-    if (depth > maxDepth || entryCount >= maxEntries) return [];
+    if (depth > maxDepth || (maxEntries !== undefined && entryCount >= maxEntries)) return [];
 
     let entries: string[];
     try {
@@ -50,10 +50,10 @@ export function getDirectorySnapshot(options: DirectorySnapshotOptions = {}): Di
       return [];
     }
 
-    const result: TreeEntry[] = [];
+      const result: TreeEntry[] = [];
 
-    for (const entry of entries) {
-      if (entryCount >= maxEntries) break;
+      for (const entry of entries) {
+        if (maxEntries !== undefined && entryCount >= maxEntries) break;
 
       const fullPath = join(dir, entry);
       const rel = relative(cwd, fullPath);
@@ -85,17 +85,16 @@ export function getDirectorySnapshot(options: DirectorySnapshotOptions = {}): Di
   return {
     root: relPath || '.',
     totalEntries: entryCount,
-    truncated: entryCount >= maxEntries,
+    truncated: maxEntries !== undefined ? entryCount >= maxEntries : false,
     tree: formatTree(tree, ''),
   };
 }
 
-export function getTopLevelStructure(maxDepth: number = 2): string {
+export function getRepositoryStructure(maxDepth: number = Number.POSITIVE_INFINITY): string {
   const snapshot = getDirectorySnapshot({
     path: '.',
     maxDepth,
     includeFiles: true,
-    maxEntries: 120,
   });
 
   return snapshot.tree || '(empty project root)';
