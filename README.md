@@ -12,6 +12,7 @@ All LLM calls go through the [Vercel AI SDK](https://sdk.vercel.ai/docs) regardl
 - **Built-in analysis tools** — chunked file reads, child-folder inspection, dependency analysis, git history, semantic search, web search, and Context7 docs lookup
 - **Persistent chats** — create, restore, and list project-local conversations under `.codebite/`
 - **Deep mode** — exhaustive multi-angle exploration for complex questions
+- **Parallel subagents** — in deep mode the main agent can spawn up to 5 focused subagents in parallel, each independently investigating a sub-question, and then synthesize their findings
 - **Context-optimized** — agent starts with the top-level tree, reads file chunks when needed, and can emit per-step context diagnosis logs
 - **Technology agnostic** — works with any language and any project structure
 
@@ -291,6 +292,10 @@ codebite ask "Which modules send emails?"
 codebite ask --deep "Explain the full request lifecycle from HTTP to database"
 codebite ask --deep "Find security vulnerabilities in this codebase"
 codebite ask --deep "What design patterns are used and are they applied consistently?"
+
+# Deep mode can delegate independent sub-investigations to parallel subagents
+codebite ask --deep "Analyze this codebase from three angles: auth flow, test coverage, and external integrations"
+# ^ the main agent may spawn parallel subagents for each angle and synthesize the results
 ```
 
 ## Running Against Any Project
@@ -353,6 +358,7 @@ codebite ask --max-steps 80 "Explain the entire auth system"
 | `semantic_search` | Find files by semantic meaning — matches on purpose, functions, and service integrations (requires `codebite index`) |
 | `web_search` | Search the web for docs and library info (requires Tavily key) |
 | `context7_docs` | Query up-to-date docs via Context7 MCP (requires Context7 key) |
+| `spawn_subagents` | Spawn 1–5 parallel subagents for independent investigations (deep mode only) |
 
 The agent calls tools in **parallel when independent** — a native feature of the Vercel AI SDK.
 

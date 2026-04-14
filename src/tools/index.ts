@@ -14,10 +14,12 @@ import { createWebSearchTool } from './web-search.js';
 import { createSemanticSearchTool } from './semantic-search.js';
 import { readFileChunkTool } from './read-file-chunk.js';
 import { createContext7DocsTool } from './context7-docs.js';
+import { createSpawnSubagentsTool } from './spawn-subagents.js';
 
 export function getAllTools(
   config: CodebiteConfig,
-  embeddingModel?: EmbeddingModel
+  embeddingModel?: EmbeddingModel,
+  runSubagent?: (task: string) => Promise<string>
 ) {
   const tools: Record<string, any> = {
     'read_file': readFileTool,
@@ -43,6 +45,10 @@ export function getAllTools(
 
   if (embeddingModel) {
     tools['semantic_search'] = createSemanticSearchTool(embeddingModel);
+  }
+
+  if (runSubagent) {
+    tools['spawn_subagents'] = createSpawnSubagentsTool(runSubagent);
   }
 
   return tools;

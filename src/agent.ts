@@ -54,7 +54,16 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
     }
   }
 
-  const tools = getAllTools(config, embeddingModel);
+  const runSubagent = config.deepMode
+    ? (task: string) =>
+        runAgent({
+          model,
+          question: task,
+          config: { ...config, deepMode: false, maxSteps: Math.min(config.maxSteps, 20) },
+        })
+    : undefined;
+
+  const tools = getAllTools(config, embeddingModel, runSubagent);
   const projectStructure = getRepositoryStructure();
   const systemPrompt = buildSystemPrompt(config, projectStructure, question);
   const executionPrompt = buildExecutionPrompt(question);
