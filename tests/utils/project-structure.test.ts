@@ -49,4 +49,19 @@ describe('project structure snapshots', () => {
     expect(result).toContain('utils/');
     expect(result).toContain('helper.ts');
   });
+
+  it('excludes gitignored and always-ignored paths from repository structure', () => {
+    mkdirSync(join(tempDir, 'node_modules', 'left-pad'), { recursive: true });
+    mkdirSync(join(tempDir, 'secret'), { recursive: true });
+    writeFileSync(join(tempDir, 'node_modules', 'left-pad', 'index.js'), '');
+    writeFileSync(join(tempDir, 'secret', 'token.txt'), '');
+    writeFileSync(join(tempDir, '.gitignore'), 'secret/\n');
+
+    const result = getRepositoryStructure();
+
+    expect(result).not.toContain('node_modules/');
+    expect(result).not.toContain('left-pad/');
+    expect(result).not.toContain('secret/');
+    expect(result).not.toContain('token.txt');
+  });
 });
