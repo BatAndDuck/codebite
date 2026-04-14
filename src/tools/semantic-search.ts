@@ -1,23 +1,15 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { embed, type EmbeddingModel } from 'ai';
-
-interface FileAnalysis {
-  path: string;
-  purpose: string;
-  exports: string[];
-  dependencies: string[];
-  summary: string;
-  language: string;
-  linesOfCode: number;
-}
+import { LocalIndex } from 'vectra';
+import { INDEX_DIR_NAME } from '../indexer/index.js';
 
 export function createSemanticSearchTool(embeddingModel: EmbeddingModel) {
   return tool({
     description:
-      'Search the codebase semantically using the pre-built index. Finds files whose purpose and content match your query conceptually. The index must be built first via "codebite index".',
+      'Search the codebase semantically using the pre-built vector index. Finds files whose purpose, functions, and service integrations match your query conceptually. Ideal for queries like "integrations to Notification Hub" or "where is payment processing handled". The index must be built first via "codebite index".',
     inputSchema: z.object({
       query: z
         .string()
@@ -33,10 +25,9 @@ export function createSemanticSearchTool(embeddingModel: EmbeddingModel) {
     }),
     execute: async ({ query, maxResults }) => {
       const cwd = process.cwd();
-      const indexDir = join(cwd, '.codebite', 'index');
-      const vectorsPath = join(cwd, '.codebite', 'vectors.json');
+      const indexDir = join(cwd, INDEX_DIR_NAME);
 
-      if (!existsSync(indexDir) || !existsSync(vectorsPath)) {
+      if (!existsSync(indexDir)) {
         return {
           error:
             'No index found. Run "codebite index" to analyze and index the codebase first.',
@@ -44,48 +35,45 @@ export function createSemanticSearchTool(embeddingModel: EmbeddingModel) {
       }
 
       try {
+        const vectorIndex = new LocalIndex(indexDir);
+
+        if (!(await vectorIndex.isIndexCreated())) {
+          return {
+            error:
+              'Index directory exists but index is not initialized. Run "codebite index" to rebuild it.',
+          };
+        }
+
         // Generate embedding for query
         const { embedding: queryVector } = await embed({
           model: embeddingModel,
           value: query,
         });
 
-        // Load stored vectors
-        const vectorData: { entries: Array<{ path: string; vector: number[] }> } =
-          JSON.parse(readFileSync(vectorsPath, 'utf-8'));
+        // Query the vector index
+        const queryResults = await vectorIndex.queryItems(queryVector, maxResults);
 
-        // Compute cosine similarity
-        const scored = vectorData.entries.map((entry) => ({
-          path: entry.path,
-          score: cosineSimilarity(queryVector, entry.vector),
-        }));
+        const results = queryResults.map((r) => {
+          const m = r.item.metadata as Record<string, any>;
 
-        // Sort by score descending
-        scored.sort((a, b) => b.score - a.score);
-        const topResults = scored.slice(0, maxResults);
-
-        // Load analysis details for top results
-        const results = topResults.map((r) => {
-          const analysisPath = join(
-            indexDir,
-            r.path.replace(/[/\\]/g, '__') + '.json'
-          );
-          let analysis: FileAnalysis | null = null;
-          if (existsSync(analysisPath)) {
-            try {
-              analysis = JSON.parse(readFileSync(analysisPath, 'utf-8'));
-            } catch {
-              // ignore
+          // Parse JSON-serialized arrays back to typed values
+          const parseArr = <T>(val: unknown): T[] => {
+            if (typeof val === 'string') {
+              try { return JSON.parse(val); } catch { return []; }
             }
-          }
+            return Array.isArray(val) ? val : [];
+          };
 
           return {
-            path: r.path,
+            path: String(m['path'] ?? ''),
             score: Math.round(r.score * 1000) / 1000,
-            purpose: analysis?.purpose,
-            summary: analysis?.summary,
-            exports: analysis?.exports,
-            language: analysis?.language,
+            purpose: String(m['purpose'] ?? ''),
+            summary: String(m['summary'] ?? ''),
+            language: String(m['language'] ?? ''),
+            linesOfCode: Number(m['linesOfCode'] ?? 0),
+            exports: parseArr<string>(m['exports']),
+            services: parseArr<string>(m['services']),
+            functions: parseArr<{ name: string; description: string }>(m['functions']),
           };
         });
 
@@ -96,22 +84,3 @@ export function createSemanticSearchTool(embeddingModel: EmbeddingModel) {
     },
   });
 }
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-  return denominator === 0 ? 0 : dotProduct / denominator;
-}
-
-export { cosineSimilarity };

@@ -22,7 +22,9 @@ describe('analyzeFile', () => {
       purpose: 'Authentication middleware for Express',
       exports: ['authMiddleware', 'validateToken'],
       dependencies: ['jsonwebtoken', 'express'],
+      services: ['Auth0'],
       patterns: ['middleware pattern'],
+      functions: [{ name: 'authMiddleware', description: 'Validates JWT tokens on incoming requests.' }],
       summary: 'Handles JWT authentication and token validation.',
     };
     vi.mocked(generateText).mockResolvedValue({ text: JSON.stringify(mockAnalysis) } as any);
@@ -31,12 +33,15 @@ describe('analyzeFile', () => {
     expect(result.path).toBe('src/auth.ts');
     expect(result.purpose).toBe('Authentication middleware for Express');
     expect(result.exports).toContain('authMiddleware');
+    expect(result.services).toContain('Auth0');
+    expect(result.functions).toHaveLength(1);
+    expect(result.functions[0].name).toBe('authMiddleware');
     expect(result.language).toBe('TypeScript');
     expect(result.linesOfCode).toBe(1);
   });
 
   it('handles LLM returning markdown-fenced JSON', async () => {
-    const analysis = { purpose: 'test', exports: [], dependencies: [], patterns: [], summary: 'test summary' };
+    const analysis = { purpose: 'test', exports: [], dependencies: [], services: [], patterns: [], functions: [], summary: 'test summary' };
     vi.mocked(generateText).mockResolvedValue({
       text: '```json\n' + JSON.stringify(analysis) + '\n```',
     } as any);
@@ -54,13 +59,15 @@ describe('analyzeFile', () => {
     const result = await analyzeFile(mockModel, 'auth.ts', 'const x = 1;', 'TypeScript');
     expect(result.purpose).toBe('Could not analyze file');
     expect(result.summary).toContain('authentication');
+    expect(result.services).toEqual([]);
+    expect(result.functions).toEqual([]);
   });
 
   it('truncates very large files before sending to LLM', async () => {
     let capturedPrompt = '';
     vi.mocked(generateText).mockImplementation(async (opts: any) => {
       capturedPrompt = opts.prompt;
-      return { text: '{"purpose":"test","exports":[],"dependencies":[],"patterns":[],"summary":"test"}' } as any;
+      return { text: '{"purpose":"test","exports":[],"dependencies":[],"services":[],"patterns":[],"functions":[],"summary":"test"}' } as any;
     });
 
     const largeContent = Array.from({ length: 500 }, (_, i) => `const x${i} = ${i};`).join('\n');
@@ -70,7 +77,7 @@ describe('analyzeFile', () => {
 
   it('sets linesOfCode correctly', async () => {
     vi.mocked(generateText).mockResolvedValue({
-      text: '{"purpose":"p","exports":[],"dependencies":[],"patterns":[],"summary":"s"}',
+      text: '{"purpose":"p","exports":[],"dependencies":[],"services":[],"patterns":[],"functions":[],"summary":"s"}',
     } as any);
 
     const content = 'line1\nline2\nline3';

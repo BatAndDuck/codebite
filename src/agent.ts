@@ -7,6 +7,7 @@ import { resolveEmbeddingModel } from './provider.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getRepositoryStructure } from './utils/project-structure.js';
+import { INDEX_DIR_NAME } from './indexer/index.js';
 import {
   createContextDiagnosisLogger,
   type StepInputSnapshot,
@@ -42,9 +43,7 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
   const { model, question, config, history = [], contextDiagnosisPath, activeChatId, onStep } = options;
 
   // Provide embedding model for semantic search when index exists
-  const indexExists =
-    existsSync(join(process.cwd(), '.codebite', 'vectors.json')) &&
-    existsSync(join(process.cwd(), '.codebite', 'index'));
+  const indexExists = existsSync(join(process.cwd(), INDEX_DIR_NAME, 'meta.json'));
 
   let embeddingModel;
   if (indexExists) {

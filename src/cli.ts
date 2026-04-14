@@ -13,6 +13,7 @@ import {
   restoreChat,
 } from './chat.js';
 import { join } from 'node:path';
+import { readIndexMeta } from './indexer/index.js';
 
 const program = new Command();
 
@@ -220,6 +221,8 @@ program
       const activeChat = getActiveChat();
       const diagnosisPath = resolveContextDiagnosisPath(opts.contextDiagnosis, activeChat?.id);
 
+      warnIfIndexStale();
+
       console.log(chalk.bold.cyan('codebite') + ' — ' + chalk.dim(question));
       console.log(chalk.dim(`Provider: ${config.provider}  Model: ${config.model}  Max steps: ${maxSteps}${deepMode ? '  [deep mode]' : ''}`));
       if (activeChat) {
@@ -313,6 +316,20 @@ program
       process.exit(1);
     }
   });
+
+function warnIfIndexStale(): void {
+  const meta = readIndexMeta();
+  if (!meta) return;
+
+  const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+  const age = Date.now() - new Date(meta.createdAt).getTime();
+  if (age > TWO_WEEKS_MS) {
+    const days = Math.floor(age / (24 * 60 * 60 * 1000));
+    console.warn(
+      chalk.yellow(`⚠ Warning: Codebase index is ${days} days old. Run "codebite index" to refresh it.`)
+    );
+  }
+}
 
 function resolveContextDiagnosisPath(
   option: string | boolean | undefined,
