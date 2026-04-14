@@ -72,13 +72,12 @@ const EMBEDDING_MODELS: Record<string, string> = {
   // anthropic has no embedding API
 };
 
-export function resolveEmbeddingModel(
-  config: Pick<CodebiteConfig, 'provider' | 'model' | 'apiKey'>
-): EmbeddingModel {
+/** Returns the canonical embedding model ID string for a given provider. */
+export function resolveEmbeddingModelId(
+  config: Pick<CodebiteConfig, 'provider'>
+): string {
   if (config.provider === 'vercel') {
-    // Use the openai embedding model via the gateway
-    process.env.AI_GATEWAY_API_KEY = config.apiKey;
-    return `openai/${EMBEDDING_MODELS.vercel}` as unknown as EmbeddingModel;
+    return `openai/${EMBEDDING_MODELS.vercel}`;
   }
 
   const modelId = EMBEDDING_MODELS[config.provider];
@@ -89,6 +88,19 @@ export function resolveEmbeddingModel(
     );
   }
 
+  return modelId;
+}
+
+export function resolveEmbeddingModel(
+  config: Pick<CodebiteConfig, 'provider' | 'model' | 'apiKey'>
+): EmbeddingModel {
+  if (config.provider === 'vercel') {
+    // Use the openai embedding model via the gateway
+    process.env.AI_GATEWAY_API_KEY = config.apiKey;
+    return `openai/${EMBEDDING_MODELS.vercel}` as unknown as EmbeddingModel;
+  }
+
+  const modelId = resolveEmbeddingModelId(config);
   const p = makeProvider(config.provider, config.apiKey);
   return (p as any).textEmbeddingModel(modelId) as EmbeddingModel;
 }

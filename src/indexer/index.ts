@@ -8,7 +8,7 @@ import { createGitignoreFilter } from '../utils/gitignore.js';
 import { detectLanguage, isBinaryFile } from '../utils/language-detect.js';
 import { analyzeFile, type FileAnalysis } from './analyzer.js';
 import { generateEmbeddings } from './embeddings.js';
-import { resolveEmbeddingModel } from '../provider.js';
+import { resolveEmbeddingModel, resolveEmbeddingModelId } from '../provider.js';
 
 export interface IndexStats {
   filesAnalyzed: number;
@@ -18,7 +18,8 @@ export interface IndexStats {
 
 export interface IndexMeta {
   createdAt: string;
-  model: string;
+  embeddingModel: string;   // model used to generate vectors (e.g. "text-embedding-3-small")
+  llmModel: string;         // model used for file analysis (e.g. "gpt-4o")
   filesAnalyzed: number;
 }
 
@@ -160,7 +161,8 @@ export async function buildIndex(
   // Write metadata file for staleness checks
   const meta: IndexMeta = {
     createdAt: new Date().toISOString(),
-    model: config.model,
+    embeddingModel: resolveEmbeddingModelId(config),
+    llmModel: config.model,
     filesAnalyzed: analyses.length,
   };
   writeFileSync(join(indexDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
