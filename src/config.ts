@@ -11,6 +11,15 @@ export const SUPPORTED_PROVIDERS = [
   'google',
   'mistral',
   'vercel',
+  'groq',
+  'xai',
+  'cohere',
+  'deepseek',
+  'bedrock',
+  'azure',
+  'togetherai',
+  'fireworks',
+  'litellm',
 ] as const;
 
 export type Provider = (typeof SUPPORTED_PROVIDERS)[number];
@@ -21,9 +30,10 @@ const toolsConfigSchema = z.object({
 });
 
 export const configSchema = z.object({
-  provider: z.string().min(1, 'Provider is required (e.g. openai, anthropic, google, mistral, vercel)'),
+  provider: z.string().min(1, 'Provider is required (e.g. openai, anthropic, groq, vercel)'),
   model: z.string().min(1, 'Model is required (e.g. gpt-4o, claude-opus-4-5)'),
   apiKey: z.string().min(1, 'API key is required. Set it in .codebite.local.json or CODEBITE_API_KEY env var'),
+  baseURL: z.string().optional(),
   maxSteps: z.number().int().min(1).max(200).default(30),
   deepMode: z.boolean().default(false),
   disableSubagents: z.boolean().default(false),
@@ -170,6 +180,7 @@ export function saveConfig(
     provider: full.provider,
     model: full.model,
     apiKey: full.apiKey,
+    ...(full.baseURL ? { baseURL: full.baseURL } : {}),
     maxSteps: full.maxSteps,
     deepMode: full.deepMode,
     ...(full.disableSubagents ? { disableSubagents: true } : {}),

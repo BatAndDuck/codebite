@@ -84,13 +84,24 @@ Config is resolved in this order (later values win):
 
 ## Supported Providers
 
+codebite supports 14 providers via the Vercel AI SDK. See **[docs/providers.md](docs/providers.md)** for the full list of models, setup instructions, and embedding support details.
+
 | Provider | `--provider` | Example model |
 |----------|-------------|--------------|
 | OpenAI | `openai` | `gpt-4o`, `gpt-4o-mini` |
 | Anthropic | `anthropic` | `claude-opus-4-5`, `claude-haiku-4-5-20251001` |
-| Google | `google` | `gemini-2.0-flash` |
+| Google Gemini | `google` | `gemini-2.0-flash`, `gemini-2.5-pro` |
 | Mistral | `mistral` | `mistral-large-latest` |
-| Vercel AI Gateway | `vercel` | any model available in your gateway |
+| Vercel AI Gateway | `vercel` | `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4-5` |
+| Groq | `groq` | `llama-3.3-70b-versatile`, `mixtral-8x7b-32768` |
+| xAI (Grok) | `xai` | `grok-3`, `grok-2-1212` |
+| Cohere | `cohere` | `command-r-plus`, `command-a-03-2025` |
+| DeepSeek | `deepseek` | `deepseek-chat`, `deepseek-reasoner` |
+| AWS Bedrock | `bedrock` | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| Azure OpenAI | `azure` | your deployment name |
+| Together AI | `togetherai` | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| Fireworks AI | `fireworks` | `accounts/fireworks/models/llama-v3p3-70b-instruct` |
+| LiteLLM | `litellm` | `ollama/llama3`, any OpenAI-compatible model |
 
 ### Vercel AI Gateway
 
@@ -137,9 +148,10 @@ Local overrides go in `.codebite.local.json` (gitignored):
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `provider` | Yes | — | `openai`, `anthropic`, `google`, `mistral`, `vercel` |
+| `provider` | Yes | — | Provider name — see [docs/providers.md](docs/providers.md) |
 | `model` | Yes | — | Model ID for the chosen provider |
 | `apiKey` | Yes* | — | API key — use `.codebite.local.json` or `CODEBITE_API_KEY` |
+| `baseURL` | No | — | Custom base URL (required for `azure`; defaults to `http://localhost:4000` for `litellm`) |
 | `maxSteps` | No | `30` | Max agent steps per query (1–200) |
 | `deepMode` | No | `false` | Enable deep mode globally |
 | `disableSubagents` | No | `false` | Disable subagent spawning in deep mode |
@@ -154,13 +166,14 @@ Local overrides go in `.codebite.local.json` (gitignored):
 
 ```bash
 codebite init \
-  --provider openai \       # provider name
-  --model gpt-4o \          # model ID
-  [--apikey sk-...] \       # LLM API key (prefer .codebite.local.json instead)
-  [--tavily-key tvly-...] \ # optional: enable web search
+  --provider openai \         # provider name (see docs/providers.md)
+  --model gpt-4o \            # model ID
+  [--apikey sk-...] \         # LLM API key (prefer .codebite.local.json instead)
+  [--base-url https://...] \  # optional: custom base URL (litellm, azure)
+  [--tavily-key tvly-...] \   # optional: enable web search
   [--context7-key ctx7-...] \ # optional: enable Context7 MCP docs lookup
-  [--max-steps 50] \        # optional: override default 30
-  [--deep]                  # optional: enable deep mode globally
+  [--max-steps 50] \          # optional: override default 30
+  [--deep]                    # optional: enable deep mode globally
 ```
 
 **Shorthand** — you can combine provider and model into one flag:

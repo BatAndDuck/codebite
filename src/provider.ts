@@ -3,6 +3,14 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createMistral } from '@ai-sdk/mistral';
+import { createGroq } from '@ai-sdk/groq';
+import { createXai } from '@ai-sdk/xai';
+import { createCohere } from '@ai-sdk/cohere';
+import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAzure } from '@ai-sdk/azure';
+import { createTogetherAI } from '@ai-sdk/togetherai';
+import { createFireworks } from '@ai-sdk/fireworks';
 import type { CodebiteConfig } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -21,25 +29,47 @@ import type { CodebiteConfig } from './config.js';
 // Provider factories (non-Vercel)
 // ---------------------------------------------------------------------------
 
-type AnyProvider =
-  | ReturnType<typeof createOpenAI>
-  | ReturnType<typeof createAnthropic>
-  | ReturnType<typeof createGoogleGenerativeAI>
-  | ReturnType<typeof createMistral>;
-
-function makeProvider(provider: string, apiKey: string): AnyProvider {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function makeProvider(provider: string, apiKey: string, baseURL?: string): any {
   switch (provider) {
     case 'openai':
-      return createOpenAI({ apiKey });
+      return createOpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) });
     case 'anthropic':
       return createAnthropic({ apiKey });
     case 'google':
       return createGoogleGenerativeAI({ apiKey });
     case 'mistral':
       return createMistral({ apiKey });
+    case 'groq':
+      return createGroq({ apiKey });
+    case 'xai':
+      return createXai({ apiKey });
+    case 'cohere':
+      return createCohere({ apiKey });
+    case 'deepseek':
+      return createDeepSeek({ apiKey });
+    case 'bedrock':
+      // Uses the AWS credential chain: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+      // AWS_REGION env vars (or ~/.aws/credentials, IAM roles).
+      // apiKey in config is ignored for Bedrock — set it to any placeholder.
+      return createAmazonBedrock();
+    case 'azure':
+      // baseURL should be your Azure OpenAI endpoint, e.g.:
+      // https://<resource>.openai.azure.com/openai/deployments
+      return createAzure({ apiKey, ...(baseURL ? { baseURL } : {}) });
+    case 'togetherai':
+      return createTogetherAI({ apiKey });
+    case 'fireworks':
+      return createFireworks({ apiKey });
+    case 'litellm':
+      // LiteLLM exposes an OpenAI-compatible API.
+      // Defaults to http://localhost:4000 when baseURL is not set.
+      return createOpenAI({ apiKey, baseURL: baseURL || 'http://localhost:4000' });
     default:
       throw new Error(
-        `Unknown provider "${provider}". Supported: openai, anthropic, google, mistral, vercel`
+        `Unknown provider "${provider}". Supported: ` +
+          `openai, anthropic, google, mistral, vercel, groq, xai, cohere, deepseek, ` +
+          `bedrock, azure, togetherai, fireworks, litellm`
       );
   }
 }
@@ -49,7 +79,7 @@ function makeProvider(provider: string, apiKey: string): AnyProvider {
 // ---------------------------------------------------------------------------
 
 export function resolveModel(
-  config: Pick<CodebiteConfig, 'provider' | 'model' | 'apiKey'>
+  config: Pick<CodebiteConfig, 'provider' | 'model' | 'apiKey' | 'baseURL'>
 ): LanguageModel {
   if (config.provider === 'vercel') {
     // Set the gateway key so the `ai` package can route the request.
@@ -59,8 +89,8 @@ export function resolveModel(
     return config.model as unknown as LanguageModel;
   }
 
-  const p = makeProvider(config.provider, config.apiKey);
-  return p.languageModel(config.model as any);
+  const p = makeProvider(config.provider, config.apiKey, config.baseURL);
+  return p.languageModel(config.model);
 }
 
 // Providers that expose a textEmbeddingModel and their default model IDs
@@ -69,7 +99,11 @@ const EMBEDDING_MODELS: Record<string, string> = {
   vercel: 'text-embedding-3-small',
   google: 'text-embedding-004',
   mistral: 'mistral-embed',
-  // anthropic has no embedding API
+  cohere: 'embed-multilingual-v3.0',
+  bedrock: 'amazon.titan-embed-text-v2:0',
+  azure: 'text-embedding-3-small',
+  litellm: 'text-embedding-3-small',
+  // anthropic, groq, xai, deepseek, togetherai, fireworks have no embedding API
 };
 
 /** Returns the canonical embedding model ID string for a given provider. */
@@ -92,7 +126,7 @@ export function resolveEmbeddingModelId(
 }
 
 export function resolveEmbeddingModel(
-  config: Pick<CodebiteConfig, 'provider' | 'model' | 'apiKey'>
+  config: Pick<CodebiteConfig, 'provider' | 'model' | 'apiKey' | 'baseURL'>
 ): EmbeddingModel {
   if (config.provider === 'vercel') {
     // Use the openai embedding model via the gateway
@@ -101,6 +135,7 @@ export function resolveEmbeddingModel(
   }
 
   const modelId = resolveEmbeddingModelId(config);
-  const p = makeProvider(config.provider, config.apiKey);
+  const p = makeProvider(config.provider, config.apiKey, config.baseURL);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (p as any).textEmbeddingModel(modelId) as EmbeddingModel;
 }
