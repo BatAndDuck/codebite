@@ -1,0 +1,7 @@
+{
+  "provider": "vercel",
+  "model": "openai/gpt-5.4-nano",
+  "apiKey": "vck_0D525IpcsUzcQ3TML2eHYSATwIReK6KQaQTd0Ga3AE0OsxZ1wP1h9LRY",
+  "maxSteps": 30,
+  "deepMode": false
+}

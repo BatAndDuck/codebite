@@ -1,0 +1,41 @@
+{
+  "name": "codebite",
+  "version": "0.1.0",
+  "description": "Agentic codebase analysis CLI — explore, understand, and analyze any codebase using LLM agents",
+  "type": "module",
+  "bin": {
+    "codebite": "./bin/codebite.mjs"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": ["cli", "codebase", "analysis", "agent", "llm", "ai"],
+  "license": "MIT",
+  "dependencies": {
+    "ai": "^6.0.0",
+    "@ai-sdk/openai": "^3.0.0",
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/mistral": "^3.0.0",
+    "commander": "^13.1.0",
+    "zod": "^3.24.0",
+    "vectra": "^0.9.0",
+    "@tavily/core": "^0.5.0",
+    "glob": "^11.0.0",
+    "ignore": "^7.0.0",
+    "chalk": "^5.4.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.12.0",
+    "vitest": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
