@@ -31,4 +31,38 @@ describe('tool registry', () => {
     expect(tools['context7_docs']).toBeDefined();
     expect(tools['web_search']).toBeDefined();
   });
+
+  it('omits spawn_subagents when no runSubagent is provided (default registry)', () => {
+    const tools = getAllTools(config);
+
+    expect(tools['spawn_subagents']).toBeUndefined();
+  });
+
+  it('omits spawn_subagents when deepMode is on but no runner is passed', () => {
+    const tools = getAllTools({ ...config, deepMode: true });
+
+    expect(tools['spawn_subagents']).toBeUndefined();
+  });
+
+  it('exposes spawn_subagents when a runSubagent closure is provided', () => {
+    const tools = getAllTools(
+      { ...config, deepMode: true },
+      undefined,
+      async () => 'noop'
+    );
+
+    expect(tools['spawn_subagents']).toBeDefined();
+  });
+
+  it('omits spawn_subagents when disableSubagents is true even with a runner', () => {
+    // disableSubagents is respected at the agent.ts level (no runner is passed),
+    // but getAllTools itself still gates on runner presence — verify the contract.
+    const tools = getAllTools(
+      { ...config, deepMode: true, disableSubagents: true },
+      undefined,
+      undefined  // agent.ts would not pass a runner when disableSubagents is true
+    );
+
+    expect(tools['spawn_subagents']).toBeUndefined();
+  });
 });

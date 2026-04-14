@@ -40,6 +40,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('context7_docs');
     expect(prompt).toContain('Compare both sides');
   });
+
+  it('mentions spawn_subagents guidance when deep mode is active', () => {
+    const prompt = buildSystemPrompt(
+      { ...baseConfig, deepMode: true },
+      '├── src/\n└── tests/',
+      'Do an exhaustive investigation'
+    );
+
+    expect(prompt).toContain('spawn_subagents');
+  });
 });
 
 describe('buildExecutionPrompt', () => {

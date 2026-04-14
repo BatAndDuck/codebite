@@ -26,6 +26,7 @@ export const configSchema = z.object({
   apiKey: z.string().min(1, 'API key is required. Set it in .codebite.local.json or CODEBITE_API_KEY env var'),
   maxSteps: z.number().int().min(1).max(200).default(30),
   deepMode: z.boolean().default(false),
+  disableSubagents: z.boolean().default(false),
   tools: toolsConfigSchema.default({}),
 });
 
@@ -157,6 +158,7 @@ export function saveConfig(
   const full = configSchema.parse({
     maxSteps: 30,
     deepMode: false,
+    disableSubagents: false,
     ...config,
   });
 
@@ -170,6 +172,7 @@ export function saveConfig(
     apiKey: full.apiKey,
     maxSteps: full.maxSteps,
     deepMode: full.deepMode,
+    ...(full.disableSubagents ? { disableSubagents: true } : {}),
     ...(Object.keys(cleanedTools).length > 0 ? { tools: cleanedTools } : {}),
   };
   writeFileSync(configPath, JSON.stringify(serialized, null, 2) + '\n', 'utf-8');

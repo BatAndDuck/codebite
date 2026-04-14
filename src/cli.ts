@@ -38,6 +38,7 @@ program
   .option('--context7-key <key>', 'Context7 API key for documentation lookup via MCP')
   .option('--max-steps <n>', 'Maximum agent steps', '30')
   .option('--deep', 'Enable deep mode by default', false)
+  .option('--no-subagents', 'Disable subagent spawning in deep mode', false)
   .action(async (opts) => {
     try {
       // Resolve provider + model from flags.
@@ -73,6 +74,7 @@ program
         apiKey: opts.apikey,
         maxSteps: parseInt(opts.maxSteps, 10),
         deepMode: opts.deep,
+        disableSubagents: opts.noSubagents ?? false,
         tools: {
           tavilyApiKey: opts.tavilyKey,
           context7ApiKey: opts.context7Key,
