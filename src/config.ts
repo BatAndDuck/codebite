@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 const CONFIG_FILENAME = '.codebite.json';
+const LOCAL_CONFIG_FILENAME = '.codebite.local.json';
 
 export const SUPPORTED_PROVIDERS = [
   'openai',
@@ -17,7 +18,7 @@ export type Provider = (typeof SUPPORTED_PROVIDERS)[number];
 export const configSchema = z.object({
   provider: z.string().min(1, 'Provider is required (e.g. openai, anthropic, google, mistral, vercel)'),
   model: z.string().min(1, 'Model is required (e.g. gpt-4o, claude-opus-4-5)'),
-  apiKey: z.string().min(1, 'API key is required'),
+  apiKey: z.string().min(1, 'API key is required. Set it in .codebite.local.json or CODEBITE_API_KEY env var'),
   maxSteps: z.number().int().min(1).max(200).default(30),
   deepMode: z.boolean().default(false),
   tavilyApiKey: z.string().optional(),
@@ -29,22 +30,16 @@ export function getConfigPath(cwd: string = process.cwd()): string {
   return join(cwd, CONFIG_FILENAME);
 }
 
-export function loadConfig(cwd: string = process.cwd()): CodebiteConfig {
-  const configPath = getConfigPath(cwd);
-
-  if (!existsSync(configPath)) {
-    throw new Error(`No ${CONFIG_FILENAME} found. Run "codebite init" first.`);
-  }
-
-  const raw = readFileSync(configPath, 'utf-8');
-  let parsed: unknown;
-
+function parseJsonFile(filePath: string, filename: string): unknown {
+  const raw = readFileSync(filePath, 'utf-8');
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
-    throw new Error(`Invalid JSON in ${CONFIG_FILENAME}`);
+    throw new Error(`Invalid JSON in ${filename}`);
   }
+}
 
+function applyBackwardCompat(parsed: unknown): unknown {
   // Backward-compat: if old format has model as "openai/gpt-4o", split it
   if (
     parsed &&
@@ -59,8 +54,32 @@ export function loadConfig(cwd: string = process.cwd()): CodebiteConfig {
       (parsed as any).model = m.slice(slash + 1);
     }
   }
+  return parsed;
+}
 
-  const result = configSchema.safeParse(parsed);
+export function loadConfig(cwd: string = process.cwd()): CodebiteConfig {
+  const configPath = getConfigPath(cwd);
+
+  if (!existsSync(configPath)) {
+    throw new Error(`No ${CONFIG_FILENAME} found. Run "codebite init" first.`);
+  }
+
+  const base = applyBackwardCompat(parseJsonFile(configPath, CONFIG_FILENAME));
+
+  // Merge local override (.codebite.local.json) on top of base config
+  const localConfigPath = join(cwd, LOCAL_CONFIG_FILENAME);
+  const local = existsSync(localConfigPath)
+    ? parseJsonFile(localConfigPath, LOCAL_CONFIG_FILENAME)
+    : {};
+
+  const merged = { ...(base as object), ...(local as object) } as Record<string, unknown>;
+
+  // Fall back to CODEBITE_API_KEY environment variable if apiKey is missing
+  if (!merged['apiKey'] && process.env.CODEBITE_API_KEY) {
+    merged['apiKey'] = process.env.CODEBITE_API_KEY;
+  }
+
+  const result = configSchema.safeParse(merged);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
