@@ -52,7 +52,7 @@ describe('configSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('applies defaults for maxSteps and deepMode', () => {
+  it('applies defaults for maxSteps, deepMode, and disableSubagents', () => {
     const result = configSchema.parse({
       provider: 'anthropic',
       model: 'claude-haiku-4-5',
@@ -60,7 +60,19 @@ describe('configSchema', () => {
     });
     expect(result.maxSteps).toBe(30);
     expect(result.deepMode).toBe(false);
+    expect(result.disableSubagents).toBe(false);
     expect(result.tools).toEqual({});
+  });
+
+  it('accepts disableSubagents: true', () => {
+    const result = configSchema.safeParse({
+      provider: 'openai',
+      model: 'gpt-4o',
+      apiKey: 'sk-test',
+      disableSubagents: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.disableSubagents).toBe(true);
   });
 
   it('accepts optional nested tool config', () => {

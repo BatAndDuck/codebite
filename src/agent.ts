@@ -54,7 +54,7 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
     }
   }
 
-  const runSubagent = config.deepMode
+  const runSubagent = config.deepMode && !config.disableSubagents
     ? (task: string) =>
         runAgent({
           model,

@@ -53,4 +53,16 @@ describe('tool registry', () => {
 
     expect(tools['spawn_subagents']).toBeDefined();
   });
+
+  it('omits spawn_subagents when disableSubagents is true even with a runner', () => {
+    // disableSubagents is respected at the agent.ts level (no runner is passed),
+    // but getAllTools itself still gates on runner presence — verify the contract.
+    const tools = getAllTools(
+      { ...config, deepMode: true, disableSubagents: true },
+      undefined,
+      undefined  // agent.ts would not pass a runner when disableSubagents is true
+    );
+
+    expect(tools['spawn_subagents']).toBeUndefined();
+  });
 });

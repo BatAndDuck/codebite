@@ -142,6 +142,7 @@ Local overrides go in `.codebite.local.json` (gitignored):
 | `apiKey` | Yes* | — | API key — use `.codebite.local.json` or `CODEBITE_API_KEY` |
 | `maxSteps` | No | `30` | Max agent steps per query (1–200) |
 | `deepMode` | No | `false` | Enable deep mode globally |
+| `disableSubagents` | No | `false` | Disable subagent spawning in deep mode |
 | `tools.tavilyApiKey` | No | — | [Tavily](https://tavily.com) key for web search |
 | `tools.context7ApiKey` | No | — | Context7 key for MCP-backed documentation lookup |
 
