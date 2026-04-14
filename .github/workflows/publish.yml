@@ -1,15 +1,7 @@
 name: Publish to npm
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
-    inputs:
-      dry-run:
-        description: 'Dry run (skip actual publish)'
-        required: false
-        default: 'false'
 
 jobs:
   publish:
@@ -19,13 +11,11 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
-          cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
@@ -38,6 +28,6 @@ jobs:
         run: npm run build
 
       - name: Publish
-        run: npm publish --access public ${{ github.event.inputs.dry-run == 'true' && '--dry-run' || '' }}
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
