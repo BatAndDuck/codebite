@@ -22,6 +22,8 @@ describe.skipIf(!apiKey)('e2e: codebite ask', () => {
       config,
     });
 
+    console.log('\n=== codebite answer ===\n', answer, '\n=======================\n');
+
     expect(answer).toBeTruthy();
     expect(answer.length).toBeGreaterThan(50);
 
