@@ -28,12 +28,13 @@ program
 program
   .command('init')
   .description('Initialize codebite configuration for this project')
-  .option('--provider <provider>', 'LLM provider (openai, anthropic, google, mistral, vercel)')
+  .option('--provider <provider>', 'LLM provider (openai, anthropic, google, mistral, vercel, groq, xai, cohere, deepseek, bedrock, azure, togetherai, fireworks, litellm)')
   .option(
     '--model <model>',
     'Model ID — either "gpt-4o" (with --provider) or "openai/gpt-4o" shorthand'
   )
   .requiredOption('--apikey <key>', 'API key for the LLM provider')
+  .option('--base-url <url>', 'Custom base URL (required for litellm; optional for azure and openai-compatible endpoints)')
   .option('--tavily-key <key>', 'Tavily API key for web search')
   .option('--context7-key <key>', 'Context7 API key for documentation lookup via MCP')
   .option('--max-steps <n>', 'Maximum agent steps', '30')
@@ -72,6 +73,7 @@ program
         provider,
         model,
         apiKey: opts.apikey,
+        ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}),
         maxSteps: parseInt(opts.maxSteps, 10),
         deepMode: opts.deep,
         disableSubagents: opts.noSubagents ?? false,
