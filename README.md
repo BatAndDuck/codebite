@@ -8,7 +8,7 @@ All LLM calls go through the [Vercel AI SDK](https://sdk.vercel.ai/docs) regardl
 
 - **Multi-provider LLM support** — OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway
 - **Smart agentic loop** — agent takes as many steps as needed, uses tools in parallel
-- **Deep indexing** — LLM analyzes each file to build a rich semantic index (not raw embeddings)
+- **Deep indexing** — LLM analyzes each file to extract purpose, per-function summaries, external service integrations, and dependencies — stored in a vector DB for semantic search
 - **Built-in analysis tools** — chunked file reads, child-folder inspection, dependency analysis, git history, semantic search, web search, and Context7 docs lookup
 - **Persistent chats** — create, restore, and list project-local conversations under `.codebite/`
 - **Deep mode** — exhaustive multi-angle exploration for complex questions
@@ -39,11 +39,16 @@ codebite init --provider vercel --model openai/gpt-4o-mini --apikey vck_your-key
 # 3. Or move the API key into local config after init (never committed)
 echo '{ "apiKey": "vck_your-key-here" }' > .codebite.local.json
 
-# 4. Index the codebase (optional but recommended for semantic search)
+# 4. Index the codebase (optional, but required for semantic search)
 codebite index
 
-# 5. Ask questions
+# 5. Commit the index so your whole team benefits from it
+git add .codebite-index/
+git commit -m "Add codebase vector index"
+
+# 6. Ask questions
 codebite ask "What does this project do and how is it structured?"
+codebite ask "Which files integrate with Stripe?"
 ```
 
 ## API Key Management
@@ -165,7 +170,7 @@ codebite init --model openai/gpt-4o
 
 ### `codebite index`
 
-Analyzes every source file with the LLM and builds a semantic index in `.codebite/`.
+Analyzes every source file with the LLM and builds a vector index at `.codebite-index/`.
 
 ```bash
 codebite index
@@ -173,13 +178,38 @@ codebite index
 
 `codebite index` reads config the same way as `ask`, so putting `apiKey` in `.codebite.local.json` is supported.
 
-How it works:
-1. Scans all files (respects `.gitignore`, skips binaries and files >100 KB)
-2. LLM analyzes each file → produces purpose, summary, exports, dependencies
-3. Stores analysis JSON in `.codebite/index/`
-4. Generates embeddings of purpose + summary → stores in `.codebite/vectors.json`
+**How it works:**
 
-> Add `.codebite/` to your `.gitignore`.
+1. Scans all files (respects `.gitignore`, skips binaries and files > 100 KB)
+2. LLM analyzes each file and produces a structured analysis:
+   - `purpose` — one-sentence description of the file
+   - `summary` — 2–4 sentence overview of the file's role in the project
+   - `functions` — per-function/method/class descriptions (name + what it does)
+   - `services` — external services/APIs integrated (e.g. "AWS S3", "Azure Notification Hub", "Redis", "Stripe")
+   - `exports` — top-level public API surface
+   - `dependencies` — external packages imported
+   - `patterns` — architectural/design patterns used
+3. Generates embeddings from the combined analysis text (purpose + summary + services + function descriptions)
+4. Stores everything in a [vectra](https://github.com/Stevenic/vectra) `LocalIndex` at `.codebite-index/` alongside a `meta.json` with creation timestamp
+
+**Git storage — commit the index to your repo:**
+
+```bash
+git add .codebite-index/
+git commit -m "Add codebase vector index"
+```
+
+Committing `.codebite-index/` lets your whole team run semantic search without re-indexing. The index is plain JSON, diffs cleanly, and only needs rebuilding when the codebase changes significantly.
+
+**Staleness warning:**
+
+`codebite ask` automatically checks how old the index is. If it is older than **2 weeks**, a warning is printed before each query:
+
+```
+⚠ Warning: Codebase index is 18 days old. Run "codebite index" to refresh it.
+```
+
+> `.codebite/` (chats, local config) stays gitignored. Only `.codebite-index/` (the vector DB) should be committed.
 
 ### `codebite ask`
 
@@ -251,6 +281,12 @@ codebite ask "Explain how the database connection is managed"
 codebite ask "What external dependencies are used and what are they for?"
 codebite ask "Are there any obvious security concerns?"
 
+# Semantic search shines for service/integration queries (requires codebite index)
+codebite ask "Which files integrate with Azure Notification Hub?"
+codebite ask "Where is Stripe used and what does each integration do?"
+codebite ask "Show me everything that touches Redis"
+codebite ask "Which modules send emails?"
+
 # Deep mode — exhaustive, cross-referenced analysis
 codebite ask --deep "Explain the full request lifecycle from HTTP to database"
 codebite ask --deep "Find security vulnerabilities in this codebase"
@@ -270,8 +306,12 @@ codebite init --provider vercel --model openai/gpt-4o-mini
 # Add your API key locally
 echo '{ "apiKey": "vck_your-key" }' > .codebite.local.json
 
-# Build semantic index (optional)
+# Build semantic index (optional but recommended)
 codebite index
+
+# Commit the index for team-wide semantic search
+git add .codebite-index/
+git commit -m "Add codebase vector index"
 
 # Ask away
 codebite ask "How does Express handle middleware chains?"
@@ -310,7 +350,7 @@ codebite ask --max-steps 80 "Explain the entire auth system"
 | `get_cwd` | Get project root path |
 | `shell_command` | Read-only git commands (`git log`, `git blame`, `git diff`, …) |
 | `dependency_analysis` | Parse `package.json`, `go.mod`, `Cargo.toml`, `requirements.txt`, … |
-| `semantic_search` | Find files by semantic meaning (requires `codebite index`) |
+| `semantic_search` | Find files by semantic meaning — matches on purpose, functions, and service integrations (requires `codebite index`) |
 | `web_search` | Search the web for docs and library info (requires Tavily key) |
 | `context7_docs` | Query up-to-date docs via Context7 MCP (requires Context7 key) |
 
@@ -384,7 +424,9 @@ The `publish` workflow runs unit tests, builds, then publishes to npm using the 
 
 Both the agent and indexer respect:
 - Your project's `.gitignore`
-- Always ignored: `node_modules`, `.git`, `.codebite`, `dist`, `build`, `coverage`, `__pycache__`, `target`, `vendor`
+- Always ignored (never scanned or shown in directory trees): `node_modules`, `.git`, `.codebite`, `.codebite-index`, `dist`, `build`, `coverage`, `__pycache__`, `target`, `vendor`
+
+`.codebite-index/` is excluded from scanning even though it is committed to git — it is a database artifact, not source code.
 
 ## License
 
