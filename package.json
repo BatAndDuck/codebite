@@ -6,12 +6,17 @@
   "bin": {
     "codebite": "./bin/codebite.mjs"
   },
+  "files": [
+    "bin",
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "cli",
