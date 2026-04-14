@@ -32,15 +32,48 @@ npx codebite <command>
 # 1. Go to any project
 cd /path/to/your-project
 
-# 2. Initialize
-codebite init --provider openai --model gpt-4o --apikey sk-...
+# 2. Initialize (without API key — store it in .codebite.local.json instead)
+codebite init --provider vercel --model openai/gpt-4o-mini
 
-# 3. Index the codebase (optional but recommended for semantic search)
+# 3. Add your API key to the local config (never committed)
+echo '{ "apiKey": "vck_your-key-here" }' > .codebite.local.json
+
+# 4. Index the codebase (optional but recommended for semantic search)
 codebite index
 
-# 4. Ask questions
+# 5. Ask questions
 codebite ask "What does this project do and how is it structured?"
 ```
+
+## API Key Management
+
+API keys are **never stored in `.codebite.json`**. Instead, use one of these approaches:
+
+### Local development — `.codebite.local.json`
+
+Create `.codebite.local.json` in your project root (it is gitignored automatically):
+
+```json
+{
+  "apiKey": "vck_your-api-key-here"
+}
+```
+
+This file overrides any field in `.codebite.json`, so you can also use it to override other settings locally (e.g. switch models without touching the committed config).
+
+### Environment variable — `CODEBITE_API_KEY`
+
+```bash
+CODEBITE_API_KEY=vck_your-key codebite ask "What is this project?"
+```
+
+### Priority order
+
+Config is resolved in this order (later values win):
+
+1. `.codebite.json` (committed, no secrets)
+2. `.codebite.local.json` (gitignored, local overrides)
+3. `CODEBITE_API_KEY` environment variable
 
 ## Supported Providers
 
@@ -57,7 +90,8 @@ codebite ask "What does this project do and how is it structured?"
 Route all calls through your [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) — just set `provider: vercel` and your Vercel API key:
 
 ```bash
-codebite init --provider vercel --model gpt-4o-mini --apikey vck_your-vercel-key
+codebite init --provider vercel --model openai/gpt-4o-mini
+echo '{ "apiKey": "vck_your-vercel-key" }' > .codebite.local.json
 ```
 
 The gateway URL is constructed from two optional environment variables:
@@ -69,20 +103,25 @@ VERCEL_GATEWAY_NAME=my-gateway      # defaults to "default"
 
 Resulting URL: `https://gateway.ai.vercel.sh/v1/{VERCEL_TEAM_ID}/{VERCEL_GATEWAY_NAME}`
 
-Only the API key lives in `.codebite.json`. The team and gateway name stay in your shell environment.
-
 ## Configuration
 
-Settings are stored in `.codebite.json` in your project root:
+Base settings are stored in `.codebite.json` in your project root (commit this, but **omit `apiKey`**):
 
 ```json
 {
-  "provider": "openai",
-  "model": "gpt-4o",
-  "apiKey": "sk-...",
+  "provider": "vercel",
+  "model": "openai/gpt-4o-mini",
   "maxSteps": 30,
-  "deepMode": false,
-  "tavilyApiKey": "tvly-..."
+  "deepMode": false
+}
+```
+
+Local overrides go in `.codebite.local.json` (gitignored):
+
+```json
+{
+  "apiKey": "vck_your-api-key-here",
+  "tavilyApiKey": "tvly-your-tavily-key"
 }
 ```
 
@@ -90,10 +129,12 @@ Settings are stored in `.codebite.json` in your project root:
 |-------|----------|---------|-------------|
 | `provider` | Yes | — | `openai`, `anthropic`, `google`, `mistral`, `vercel` |
 | `model` | Yes | — | Model ID for the chosen provider |
-| `apiKey` | Yes | — | API key for the provider |
+| `apiKey` | Yes* | — | API key — use `.codebite.local.json` or `CODEBITE_API_KEY` |
 | `maxSteps` | No | `30` | Max agent steps per query (1–200) |
 | `deepMode` | No | `false` | Enable deep mode globally |
 | `tavilyApiKey` | No | — | [Tavily](https://tavily.com) key for web search |
+
+*`apiKey` must be provided via `.codebite.local.json` or `CODEBITE_API_KEY` env var.
 
 ## CLI Reference
 
@@ -103,7 +144,7 @@ Settings are stored in `.codebite.json` in your project root:
 codebite init \
   --provider openai \       # provider name
   --model gpt-4o \          # model ID
-  --apikey sk-... \         # LLM API key
+  [--apikey sk-...] \       # LLM API key (prefer .codebite.local.json instead)
   [--tavily-key tvly-...] \ # optional: enable web search
   [--max-steps 50] \        # optional: override default 30
   [--deep]                  # optional: enable deep mode globally
@@ -112,7 +153,7 @@ codebite init \
 **Shorthand** — you can combine provider and model into one flag:
 
 ```bash
-codebite init --model openai/gpt-4o --apikey sk-...
+codebite init --model openai/gpt-4o
 #                     ^^^^^^ auto-parsed as provider=openai, model=gpt-4o
 ```
 
@@ -164,8 +205,11 @@ codebite ask --deep "What design patterns are used and are they applied consiste
 git clone https://github.com/expressjs/express /tmp/express
 cd /tmp/express
 
-# Initialize
-codebite init --provider openai --model gpt-4o --apikey $OPENAI_API_KEY
+# Initialize (no API key in config)
+codebite init --provider vercel --model openai/gpt-4o-mini
+
+# Add your API key locally
+echo '{ "apiKey": "vck_your-key" }' > .codebite.local.json
 
 # Build semantic index (optional)
 codebite index
@@ -213,12 +257,54 @@ The agent calls tools in **parallel when independent** — a native feature of t
 ```bash
 npm install
 npm run build          # tsc → dist/
-npm test               # vitest run (131 tests)
+npm test               # vitest run (unit tests only)
+npm run test:e2e       # integration tests (requires VERCEL_API_KEY)
 npm run test:watch     # watch mode
 
 # Run without building (dev mode)
 npx tsx src/cli.ts ask "What is this project?"
 ```
+
+### Local API key for development
+
+Create `.codebite.local.json` in the project root (it is gitignored):
+
+```json
+{
+  "apiKey": "vck_your-local-key"
+}
+```
+
+This file is merged on top of `.codebite.json` at runtime. You can also override any other config field here.
+
+## CI / CD
+
+### PR checks
+
+Every pull request targeting `main` runs two jobs automatically via GitHub Actions:
+
+- **Unit Tests** — `npm test` (fast, no API key needed)
+- **E2E Tests** — `npm run test:e2e` (calls the live LLM; requires `VERCEL_API_KEY` secret)
+
+The E2E test asks `"What is this repo?"` against the actual codebase and asserts the answer contains relevant keywords (`codebase`, `codebite`, `cli`, `agent`, `llm`, or `analysis`).
+
+### Publishing to npm
+
+Push a version tag to trigger automatic publishing:
+
+```bash
+npm version patch   # or minor / major
+git push --follow-tags
+```
+
+The `publish` workflow runs unit tests, builds, then publishes to npm using the `NPM_TOKEN` secret.
+
+### Required GitHub Secrets
+
+| Secret | Used by | Description |
+|--------|---------|-------------|
+| `NPM_TOKEN` | publish workflow | npm automation token with publish rights |
+| `VERCEL_API_KEY` | CI e2e workflow | Vercel AI Gateway key for live LLM calls |
 
 ## Ignoring Files
 

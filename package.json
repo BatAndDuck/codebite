@@ -10,7 +10,8 @@
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "keywords": ["cli", "codebase", "analysis", "agent", "llm", "ai"],
   "license": "MIT",
