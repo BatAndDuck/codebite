@@ -140,3 +140,4 @@ vite.config.ts.timestamp-*
 
 # Local codebite config (contains API keys — never commit)
 .codebite.local.json
+.codebite/

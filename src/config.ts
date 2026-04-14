@@ -15,13 +15,18 @@ export const SUPPORTED_PROVIDERS = [
 
 export type Provider = (typeof SUPPORTED_PROVIDERS)[number];
 
+const toolsConfigSchema = z.object({
+  tavilyApiKey: z.string().optional(),
+  context7ApiKey: z.string().optional(),
+});
+
 export const configSchema = z.object({
   provider: z.string().min(1, 'Provider is required (e.g. openai, anthropic, google, mistral, vercel)'),
   model: z.string().min(1, 'Model is required (e.g. gpt-4o, claude-opus-4-5)'),
   apiKey: z.string().min(1, 'API key is required. Set it in .codebite.local.json or CODEBITE_API_KEY env var'),
   maxSteps: z.number().int().min(1).max(200).default(30),
   deepMode: z.boolean().default(false),
-  tavilyApiKey: z.string().optional(),
+  tools: toolsConfigSchema.default({}),
 });
 
 export type CodebiteConfig = z.infer<typeof configSchema>;
@@ -54,7 +59,51 @@ function applyBackwardCompat(parsed: unknown): unknown {
       (parsed as any).model = m.slice(slash + 1);
     }
   }
+
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    const tools =
+      obj['tools'] && typeof obj['tools'] === 'object' && !Array.isArray(obj['tools'])
+        ? { ...(obj['tools'] as Record<string, unknown>) }
+        : {};
+
+    if (obj['tavilyApiKey'] !== undefined && tools['tavilyApiKey'] === undefined) {
+      tools['tavilyApiKey'] = obj['tavilyApiKey'];
+    }
+
+    if (obj['context7ApiKey'] !== undefined && tools['context7ApiKey'] === undefined) {
+      tools['context7ApiKey'] = obj['context7ApiKey'];
+    }
+
+    if (Object.keys(tools).length > 0) {
+      obj['tools'] = tools;
+    }
+  }
+
   return parsed;
+}
+
+function mergeConfigObjects(base: unknown, local: unknown): Record<string, unknown> {
+  const baseObj = base && typeof base === 'object' ? (base as Record<string, unknown>) : {};
+  const localObj = local && typeof local === 'object' ? (local as Record<string, unknown>) : {};
+
+  const baseTools =
+    baseObj['tools'] && typeof baseObj['tools'] === 'object' && !Array.isArray(baseObj['tools'])
+      ? (baseObj['tools'] as Record<string, unknown>)
+      : {};
+  const localTools =
+    localObj['tools'] && typeof localObj['tools'] === 'object' && !Array.isArray(localObj['tools'])
+      ? (localObj['tools'] as Record<string, unknown>)
+      : {};
+
+  return {
+    ...baseObj,
+    ...localObj,
+    tools: {
+      ...baseTools,
+      ...localTools,
+    },
+  };
 }
 
 export function loadConfig(cwd: string = process.cwd()): CodebiteConfig {
@@ -69,15 +118,26 @@ export function loadConfig(cwd: string = process.cwd()): CodebiteConfig {
   // Merge local override (.codebite.local.json) on top of base config
   const localConfigPath = join(cwd, LOCAL_CONFIG_FILENAME);
   const local = existsSync(localConfigPath)
-    ? parseJsonFile(localConfigPath, LOCAL_CONFIG_FILENAME)
+    ? applyBackwardCompat(parseJsonFile(localConfigPath, LOCAL_CONFIG_FILENAME))
     : {};
 
-  const merged = { ...(base as object), ...(local as object) } as Record<string, unknown>;
+  const merged = mergeConfigObjects(base, local);
 
   // Fall back to CODEBITE_API_KEY environment variable if apiKey is missing
   if (!merged['apiKey'] && process.env.CODEBITE_API_KEY) {
     merged['apiKey'] = process.env.CODEBITE_API_KEY;
   }
+
+  const tools =
+    merged['tools'] && typeof merged['tools'] === 'object' && !Array.isArray(merged['tools'])
+      ? { ...(merged['tools'] as Record<string, unknown>) }
+      : {};
+
+  if (!tools['context7ApiKey'] && process.env.CONTEXT7_API_KEY) {
+    tools['context7ApiKey'] = process.env.CONTEXT7_API_KEY;
+  }
+
+  merged['tools'] = tools;
 
   const result = configSchema.safeParse(merged);
   if (!result.success) {
@@ -101,7 +161,18 @@ export function saveConfig(
   });
 
   const configPath = getConfigPath(cwd);
-  writeFileSync(configPath, JSON.stringify(full, null, 2) + '\n', 'utf-8');
+  const cleanedTools = Object.fromEntries(
+    Object.entries(full.tools).filter(([, value]) => value !== undefined)
+  );
+  const serialized = {
+    provider: full.provider,
+    model: full.model,
+    apiKey: full.apiKey,
+    maxSteps: full.maxSteps,
+    deepMode: full.deepMode,
+    ...(Object.keys(cleanedTools).length > 0 ? { tools: cleanedTools } : {}),
+  };
+  writeFileSync(configPath, JSON.stringify(serialized, null, 2) + '\n', 'utf-8');
 
   return full;
 }

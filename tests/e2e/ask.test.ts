@@ -13,6 +13,7 @@ describe.skipIf(!apiKey)('e2e: codebite ask', () => {
       apiKey: apiKey!,
       maxSteps: 10,
       deepMode: false,
+      tools: {},
     };
 
     const model = resolveModel(config);

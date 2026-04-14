@@ -14,6 +14,9 @@ const ALLOWED_COMMANDS = [
   'git shortlog',
   'git rev-parse',
   'git ls-files',
+  'npm outdated',
+  'npm show',
+  'npm view',
   'wc',
   'du',
 ];
@@ -32,7 +35,7 @@ function isCommandAllowed(command: string): boolean {
 }
 
 export const shellCommandTool = tool({
-  description: `Execute a read-only shell command for code analysis. Allowed commands: ${ALLOWED_COMMANDS.join(', ')}. Use for git history, blame, diff, and file statistics.`,
+  description: `Execute a restricted read-only shell command for code analysis. This is not a general shell. Allowed commands: ${ALLOWED_COMMANDS.join(', ')}. Use for git history, blame, diff, file statistics, and npm package metadata such as outdated/show/view.`,
   inputSchema: z.object({
     command: z.string().describe('Shell command to execute'),
   }),
