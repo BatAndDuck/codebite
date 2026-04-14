@@ -6,6 +6,7 @@ const ALWAYS_IGNORE = [
   'node_modules',
   '.git',
   '.codebite',
+  '.codebite-index',
   'dist',
   'build',
   '.next',

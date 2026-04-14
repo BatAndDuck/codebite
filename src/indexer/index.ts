@@ -1,7 +1,8 @@
 import { type LanguageModel } from 'ai';
 import { glob } from 'glob';
-import { readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { LocalIndex } from 'vectra';
 import type { CodebiteConfig } from '../config.js';
 import { createGitignoreFilter } from '../utils/gitignore.js';
 import { detectLanguage, isBinaryFile } from '../utils/language-detect.js';
@@ -15,7 +16,32 @@ export interface IndexStats {
   durationMs: number;
 }
 
+export interface IndexMeta {
+  createdAt: string;
+  model: string;
+  filesAnalyzed: number;
+}
+
 const MAX_FILE_SIZE = 100 * 1024; // 100KB
+
+export const INDEX_DIR_NAME = '.codebite-index';
+
+/** Build a rich text representation of a file analysis for embedding. */
+function buildEmbedText(analysis: FileAnalysis): string {
+  const parts = [analysis.purpose, analysis.summary];
+
+  if (analysis.services.length > 0) {
+    parts.push(`Services: ${analysis.services.join(', ')}`);
+  }
+  if (analysis.functions.length > 0) {
+    const fnSummary = analysis.functions
+      .map((f) => `${f.name}: ${f.description}`)
+      .join('; ');
+    parts.push(`Functions: ${fnSummary}`);
+  }
+
+  return parts.join('\n');
+}
 
 export async function buildIndex(
   config: CodebiteConfig,
@@ -26,11 +52,6 @@ export async function buildIndex(
   const cwd = process.cwd();
   const ig = createGitignoreFilter(cwd);
 
-  // Create .codebite directories
-  const codebiteDir = join(cwd, '.codebite');
-  const indexDir = join(codebiteDir, 'index');
-  mkdirSync(indexDir, { recursive: true });
-
   // Scan for files
   onProgress?.('Scanning files...');
   const allFiles = await glob('**/*', {
@@ -38,6 +59,7 @@ export async function buildIndex(
     nodir: true,
     dot: false,
     absolute: true,
+    ignore: [`${INDEX_DIR_NAME}/**`],
   });
 
   const files = allFiles.filter((f) => {
@@ -56,7 +78,7 @@ export async function buildIndex(
 
   // Analyze each file with LLM
   const analyses: FileAnalysis[] = [];
-  const concurrency = 3; // Analyze 3 files at a time
+  const concurrency = 3;
 
   for (let i = 0; i < files.length; i += concurrency) {
     const batch = files.slice(i, i + concurrency);
@@ -66,14 +88,11 @@ export async function buildIndex(
         const content = readFileSync(file, 'utf-8');
         const language = detectLanguage(file);
 
-        onProgress?.(
-          `Analyzing (${i + 1}/${files.length}): ${rel}`
-        );
+        onProgress?.(`Analyzing (${i + 1}/${files.length}): ${rel}`);
 
         try {
           return await analyzeFile(model, rel, content, language);
-        } catch (err: any) {
-          // Skip files that fail analysis
+        } catch {
           return null;
         }
       })
@@ -84,54 +103,67 @@ export async function buildIndex(
     }
   }
 
-  // Save individual analysis files
-  onProgress?.('Saving analysis results...');
-  for (const analysis of analyses) {
-    const filename = analysis.path.replace(/[/\\]/g, '__') + '.json';
-    writeFileSync(
-      join(indexDir, filename),
-      JSON.stringify(analysis, null, 2),
-      'utf-8'
-    );
-  }
-
-  // Generate embeddings for purpose + summary
+  // Generate embeddings for rich text (purpose + summary + services + functions)
   onProgress?.('Generating embeddings...');
   let embeddingModel;
   try {
     embeddingModel = resolveEmbeddingModel(config);
   } catch (err: any) {
-    // If provider doesn't support embeddings, save analyses without vectors
     onProgress?.(`Skipping embeddings: ${err.message}`);
     const durationMs = Date.now() - startTime;
-    return {
-      filesAnalyzed: analyses.length,
-      chunksStored: 0,
-      durationMs,
-    };
+    return { filesAnalyzed: analyses.length, chunksStored: 0, durationMs };
   }
 
-  const textsToEmbed = analyses.map(
-    (a) => `${a.purpose}\n${a.summary}`
-  );
-
+  const textsToEmbed = analyses.map(buildEmbedText);
   const embeddings = await generateEmbeddings(embeddingModel, textsToEmbed);
 
-  // Save vectors
-  const vectorData = {
-    model: config.model,
-    createdAt: new Date().toISOString(),
-    entries: analyses.map((a, i) => ({
-      path: a.path,
-      vector: embeddings[i],
-    })),
-  };
+  // Build vectra LocalIndex at .codebite-index/
+  onProgress?.('Storing vector index...');
+  const indexDir = join(cwd, INDEX_DIR_NAME);
 
-  writeFileSync(
-    join(codebiteDir, 'vectors.json'),
-    JSON.stringify(vectorData),
-    'utf-8'
-  );
+  // Clear and recreate the index directory
+  if (existsSync(indexDir)) {
+    rmSync(indexDir, { recursive: true, force: true });
+  }
+  mkdirSync(indexDir, { recursive: true });
+
+  const vectorIndex = new LocalIndex(indexDir);
+  await vectorIndex.createIndex();
+
+  await vectorIndex.beginUpdate();
+  try {
+    for (let i = 0; i < analyses.length; i++) {
+      const analysis = analyses[i];
+      await vectorIndex.insertItem({
+        vector: embeddings[i],
+        metadata: {
+          path: analysis.path,
+          purpose: analysis.purpose,
+          summary: analysis.summary,
+          language: analysis.language,
+          linesOfCode: analysis.linesOfCode,
+          // Store arrays as JSON strings (vectra only supports primitive arrays)
+          exports: JSON.stringify(analysis.exports),
+          dependencies: JSON.stringify(analysis.dependencies),
+          services: JSON.stringify(analysis.services),
+          patterns: JSON.stringify(analysis.patterns),
+          functions: JSON.stringify(analysis.functions),
+        },
+      });
+    }
+    await vectorIndex.endUpdate();
+  } catch (err) {
+    await vectorIndex.cancelUpdate();
+    throw err;
+  }
+
+  // Write metadata file for staleness checks
+  const meta: IndexMeta = {
+    createdAt: new Date().toISOString(),
+    model: config.model,
+    filesAnalyzed: analyses.length,
+  };
+  writeFileSync(join(indexDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
 
   const durationMs = Date.now() - startTime;
   return {
@@ -139,4 +171,15 @@ export async function buildIndex(
     chunksStored: embeddings.length,
     durationMs,
   };
+}
+
+/** Read index metadata without loading the full vector index. */
+export function readIndexMeta(cwd: string = process.cwd()): IndexMeta | null {
+  const metaPath = join(cwd, INDEX_DIR_NAME, 'meta.json');
+  if (!existsSync(metaPath)) return null;
+  try {
+    return JSON.parse(readFileSync(metaPath, 'utf-8')) as IndexMeta;
+  } catch {
+    return null;
+  }
 }
