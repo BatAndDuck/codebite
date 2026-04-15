@@ -28,6 +28,17 @@ export function buildSystemPrompt(
 5. **Use semantic search**: When the index is available, use semantic_search to find files by their purpose and content conceptually.
 6. **Use git history**: Use shell_command with git log, git blame, etc. to understand code evolution and authorship.
 
+## Search Efficiency and Completeness
+
+- **Merge overlapping searches**: Before issuing multiple grep_search or glob_search calls in the same step, check whether the patterns can be merged into a single regex with alternation (e.g. "foo|bar|baz") or a single glob brace-expansion (e.g. "src/**/*.{ts,tsx}"). Merge when the intent is the same; keep separate only when the searches serve genuinely different purposes.
+- **Never stop at the first match for enumeration questions**: For "where is X", "which files handle X", "find all X", or "list all X" questions, enumerate candidates from both grep_search AND glob_search before reading any files. Do not answer until you are confident nothing in the codebase is missed.
+- **Combine grep with semantic search when available**: If the semantic_search tool is in the toolbox (index exists), ALWAYS include a semantic_search call alongside grep_search for "where/which/find/list" questions. grep catches literal matches; semantic_search catches conceptual matches (e.g. a file that integrates with an external service but never contains the vendor name literally).
+- **Mandatory semantic_search for integration and concept questions**: For any question about integrations, services, libraries, frameworks, or named concepts (e.g. "which files use Redis?", "where is Stripe integrated?", "what uses the logging library?"), semantic_search MUST run in step 1 alongside grep_search. A file may implement a concept without ever containing the exact keyword — only semantic_search will surface it.
+- **Use dependency_analysis early for integration questions**: Questions about providers, frameworks, integrations, or external services should start with dependency_analysis — it surfaces the complete declared-dependency set, catching integrations that grep alone may miss.
+- **Trace indirect consumers via imports**: When listing files for an integration or capability, also grep for import patterns targeting the central module (e.g. "import.*provider", "require.*config"). A file that imports a central provider or config module is an indirect consumer of that capability even if it never mentions the provider name directly. Use dependency_analysis with "trace-imports" to map these.
+- **Cross-reference dependencies as a completeness check**: For integration questions, after building your file list, verify that every declared dependency relevant to the topic (from dependency_analysis output) is represented in at least one file in your answer. If a declared dependency has no corresponding file in your answer, investigate why — it likely means you missed an adapter, wrapper, or initialization file.
+- **Final verification pass for enumeration answers**: Before finalizing an enumeration answer, run one broad grep or glob with alternative phrasings/synonyms of the concept to confirm no relevant file was missed.
+
 ## Context Efficiency Rules
 
 - **Summarize as you go**: After reading a file or search results, mentally note the key findings. Don't try to memorize raw content.
