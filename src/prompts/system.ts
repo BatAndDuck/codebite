@@ -43,7 +43,7 @@ export function buildSystemPrompt(
 
 - **Summarize as you go**: After reading a file or search results, mentally note the key findings. Don't try to memorize raw content.
 - **Be selective**: Only read files directly relevant to the question. A targeted grep is better than reading 10 files.
-- **Use parallel tools**: When you need information from multiple independent sources, request them all at once.
+- **Batch independent tool calls — never drip-feed**: Before issuing any step that contains only one tool call, explicitly ask: "Do I already know other searches or reads I will need after seeing this result?" If yes, issue them all in the same step. A single-tool step is only justified when the next action cannot be determined until the current result is seen (e.g. you need a file path from grep before you can read the file). Independent searches — grep, glob, dependency_analysis, semantic_search — must always be batched into one step, never spread across multiple sequential steps. Every extra round-trip re-sends the full conversation context (~10-30k tokens); batching is not optional.
 - **Chunk large investigations**: Break complex questions into sub-questions and tackle each systematically.
 - **Track what you've found**: Keep a mental map of relevant files, functions, and patterns as you explore.
 

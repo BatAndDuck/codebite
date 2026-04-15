@@ -78,6 +78,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('trace-imports');
   });
 
+  it('requires batching independent tool calls in a single step', () => {
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Which files use Redis?');
+
+    expect(prompt).toContain('Batch independent tool calls');
+    expect(prompt).toContain('never drip-feed');
+    expect(prompt).toContain('A single-tool step is only justified');
+    expect(prompt).toContain('never spread across multiple sequential steps');
+  });
+
   it('instructs to cross-reference dependency_analysis as a completeness check', () => {
     const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'List all Stripe integrations');
 
