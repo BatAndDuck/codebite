@@ -213,8 +213,8 @@ program
   .option('--deep', 'Enable deep analysis mode')
   .option('--max-steps <n>', 'Override max steps for this query')
   .option(
-    '--context-diagnosis [path]',
-    'Write per-step context snapshots to a JSONL file (default under .codebite/context-diagnosis/)'
+    '--diagnostics [path]',
+    'Write full diagnostics log (context, LLM responses, tool calls, errors) to a JSONL file (default under .codebite/diagnostics/)'
   )
   .action(async (question, opts) => {
     try {
@@ -223,7 +223,7 @@ program
       const maxSteps = opts.maxSteps ? parseInt(opts.maxSteps, 10) : config.maxSteps;
       const deepMode = opts.deep ?? config.deepMode;
       const activeChat = getActiveChat();
-      const diagnosisPath = resolveContextDiagnosisPath(opts.contextDiagnosis, activeChat?.id);
+      const diagPath = resolveDiagnosticsPath(opts.diagnostics, activeChat?.id);
 
       warnIfIndexStale();
 
@@ -232,8 +232,8 @@ program
       if (activeChat) {
         console.log(chalk.dim(`Chat: ${activeChat.name} (${activeChat.messages.length} saved messages)`));
       }
-      if (diagnosisPath) {
-        console.log(chalk.dim(`Context diagnosis: ${diagnosisPath}`));
+      if (diagPath) {
+        console.log(chalk.dim(`Diagnostics: ${diagPath}`));
       }
       console.log(chalk.dim('─'.repeat(60)));
 
@@ -246,7 +246,7 @@ program
         })),
         config: { ...config, maxSteps, deepMode },
         activeChatId: activeChat?.id ?? null,
-        contextDiagnosisPath: diagnosisPath,
+        diagnosticsPath: diagPath,
         onStep: printStep,
       });
 
@@ -335,7 +335,7 @@ function warnIfIndexStale(): void {
   }
 }
 
-function resolveContextDiagnosisPath(
+function resolveDiagnosticsPath(
   option: string | boolean | undefined,
   activeChatId?: string
 ): string | undefined {
@@ -348,7 +348,7 @@ function resolveContextDiagnosisPath(
     .replace('T', '-')
     .replace('Z', '');
   const fileName = `${activeChatId ?? 'adhoc'}-${timestamp}.jsonl`;
-  return join('.codebite', 'context-diagnosis', fileName);
+  return join('.codebite', 'diagnostics', fileName);
 }
 
 program.parse();

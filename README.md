@@ -13,7 +13,7 @@ All LLM calls go through the [Vercel AI SDK](https://sdk.vercel.ai/docs) regardl
 - **Persistent chats** — create, restore, and list project-local conversations under `.codebite/`
 - **Deep mode** — exhaustive multi-angle exploration for complex questions
 - **Parallel subagents** — in deep mode the main agent can spawn up to 5 focused subagents in parallel, each independently investigating a sub-question, and then synthesize their findings
-- **Context-optimized** — agent starts with the top-level tree, reads file chunks when needed, and can emit per-step context diagnosis logs
+- **Context-optimized** — agent starts with the top-level tree, reads file chunks when needed, and supports full diagnostics logging for troubleshooting and auditing
 - **Technology agnostic** — works with any language and any project structure
 
 ## Installation
@@ -232,8 +232,17 @@ Committing `.codebite-index/` lets your whole team run semantic search without r
 codebite ask "your question"
 codebite ask --deep "exhaustive analysis question"
 codebite ask --max-steps 60 "complex question on large codebase"
-codebite ask --context-diagnosis "trace this investigation"
+codebite ask --diagnostics "trace this investigation"
+
+# Flags can be combined freely
+codebite ask --deep --max-steps 80 --diagnostics "Explain the full auth lifecycle"
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--deep` | Enable deep analysis mode for this turn (spawns parallel subagents, exhaustive exploration). Overrides the global `deepMode` setting for one query. |
+| `--max-steps <n>` | Override the maximum number of agent steps for this run (integer 1–200). Takes precedence over the `maxSteps` field in `.codebite.json`. Useful for bumping the limit on large codebases or trimming it for quick lookups. |
+| `--diagnostics [path]` | Write a full JSONL event log of the run (see [Diagnostics](#--diagnostics--full-run-logging) below). |
 
 If an active chat exists, `ask` continues that conversation automatically and persists the new turn.
 
@@ -256,6 +265,48 @@ codebite ask "Summarize the auth risks in 5 bullets"
 ```
 
 Each `ask` command appends to the currently active chat, so the agent keeps the earlier conversation context. `--deep` changes only that one turn unless deep mode is enabled globally in config.
+
+#### `--diagnostics` — full run logging
+
+```bash
+codebite ask --diagnostics "Why does the auth flow break on token refresh?"
+# writes to .codebite/diagnostics/adhoc-2026-04-15-....jsonl
+
+codebite ask --diagnostics ./my-run.jsonl "trace this"
+# writes to a custom path
+```
+
+When `--diagnostics` is set, every event during the agentic run is appended as a JSON line to a JSONL file. The log contains:
+
+| Event type | What is captured |
+|------------|-----------------|
+| `run-start` | Timestamp, question, system prompt, initial conversation messages, repository structure, config (provider, model, maxSteps, deepMode) |
+| `step-start` | Timestamp, step number, full input context sent to the LLM (system, messages, active tools list, tool choice) |
+| `step-finish` | Timestamp, step number, duration, finish reason, token usage, raw LLM response metadata (id, modelId, headers), generated text, all tool calls with arguments and results, response messages |
+| `error` | Timestamp, error details (name, message, stack trace), context label |
+| `run-finish` | Timestamp, total step count, total token usage, finish reason, final answer text |
+
+The log file path defaults to `.codebite/diagnostics/{chatId}-{timestamp}.jsonl` (or `adhoc-{timestamp}.jsonl` outside a chat). Pass an explicit path to write elsewhere.
+
+This is useful for:
+- **Debugging** unexpected agent behavior step-by-step
+- **Auditing** all LLM calls and tool interactions in a run
+- **Performance analysis** — token usage and duration per step
+- **Replaying** a run to understand which tools were called and why
+
+#### Accuracy and completeness
+
+For questions that enumerate files, integrations, or usages ("which files use X?", "where is Y integrated?", "list all Z"), the agent follows a layered strategy to avoid missing anything:
+
+1. **Semantic search + grep in parallel** — when a semantic index exists, `semantic_search` runs alongside `grep_search` in the first step. grep catches literal keyword matches; semantic search catches files that implement the concept without containing the exact term (e.g. a Redis client wrapper that never uses the word "Redis" in top-level identifiers).
+
+2. **Indirect consumer detection** — after finding direct matches, the agent greps for import patterns targeting the central module (e.g. `import.*provider`) to surface files that depend on a capability indirectly. This catches wrappers, adapters, and initializers that are indirect consumers.
+
+3. **Dependency cross-reference** — the agent verifies that every declared dependency relevant to the question (from `dependency_analysis`) is represented by at least one file in the answer. Missing entries trigger a deeper investigation rather than a silent omission.
+
+4. **Final verification pass** — before writing the answer, the agent runs a broad grep with alternative phrasings/synonyms to confirm completeness.
+
+These rules are baked into the agent's system prompt and apply automatically to every `ask` run — no extra flags needed.
 
 ### `codebite new`
 
