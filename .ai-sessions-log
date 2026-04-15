@@ -1,0 +1,5 @@
+# AI Sessions Log
+# Format: YYYY-MM-DD | branch-or-topic | summary (max 300 chars)
+# Followup: append +YYYY-MM-DD <note> to the existing line
+
+2026-04-15 | quirky-cerf | Added session log and versioning rules to AGENTS.md. Introduced .ai-sessions-log to track AI session history, prevent repeated mistakes, and enforce changelog+version bump discipline before npm releases.
