@@ -25,6 +25,44 @@ If no — the implementation is wrong, even if it works in the current test envi
 - Use synthetic fixture data (temp dirs, in-memory strings), not implicit reliance on the codebite source tree.
 - Don't write assertions that only pass because `package.json` or `tsconfig.json` exists at the repo root.
 
+## Session Log - Read Before Implementing
+
+**Always read `.ai-sessions-log` before starting any implementation task.**
+
+It records past AI sessions: what changed, why, and gotchas discovered.
+Prevents repeating past mistakes and re-solving already-solved problems.
+
+```
+cat .ai-sessions-log
+```
+
+
+## Session Log - Update Before Pushing
+
+**Before every `git push`, add or update an entry in `.ai-sessions-log`.**
+
+Rules:
+- One entry per session/PR branch - update the same line for followup pushes
+- Max 300 chars: what changed + why (no fluff)
+- Format: `YYYY-MM-DD | branch-or-topic | summary`
+- Followup: append ` +YYYY-MM-DD <note>` to the existing line
+
+Example:
+```
+2026-03-20 | pr-review-pipeline | Added 10-stage pipeline with diff parser + verifier. Replaces broken runner.ts flow that missed line ranges and duplicated findings across reviewers.
+```
+
+## Publishing a New Version
+
+**Before committing any change intended for npm release:**
+
+1. Move the `## Unreleased` section in `CHANGELOG.md` to the new version number (e.g. `## 0.1.7`).
+2. Bump `"version"` in `package.json` to match.
+3. Commit both files together with the rest of the change.
+
+Do this **every time** — never publish to npm without a matching changelog entry and version bump.
+
+
 ## Before submitting
 
 - [ ] No codebite-internal paths in prompt text or tool logic
