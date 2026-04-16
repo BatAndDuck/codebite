@@ -1,6 +1,7 @@
 import type { EmbeddingModel } from 'ai';
 import type { CodebiteConfig } from '../config.js';
-import { readFileTool } from './read-file.js';
+import { createReadFileTool } from './read-file.js';
+import { loadFileSummaries, getFileSummary } from '../utils/index-lookup.js';
 import { globSearchTool } from './glob-search.js';
 import { grepSearchTool } from './grep-search.js';
 import { directoryTreeTool } from './directory-tree.js';
@@ -21,8 +22,15 @@ export function getAllTools(
   embeddingModel?: EmbeddingModel,
   runSubagent?: (task: string) => Promise<string>
 ) {
+  // B: Load index summaries once and wire into read_file so every file read
+  // automatically gets the pre-built semantic context prepended.
+  const fileSummaries = loadFileSummaries();
+  const getSummary = fileSummaries
+    ? (p: string) => getFileSummary(p, fileSummaries)
+    : undefined;
+
   const tools: Record<string, any> = {
-    'read_file': readFileTool,
+    'read_file': createReadFileTool(getSummary),
     'read_file_chunk': readFileChunkTool,
     'glob_search': globSearchTool,
     'grep_search': grepSearchTool,

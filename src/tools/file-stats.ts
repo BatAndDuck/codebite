@@ -4,6 +4,7 @@ import { readFileSync, statSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { detectLanguage, isBinaryFile } from '../utils/language-detect.js';
 import { createGitignoreFilter, isIgnored } from '../utils/gitignore.js';
+import { formatSize } from '../utils/format-size.js';
 
 export const fileStatsTool = tool({
   description:
@@ -64,8 +65,3 @@ export const fileStatsTool = tool({
   },
 });
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}

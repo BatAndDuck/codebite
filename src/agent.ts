@@ -12,6 +12,8 @@ import {
   createDiagnosticsLogger,
   type StepInputSnapshot,
 } from './utils/diagnostics.js';
+import { compressMessages } from './utils/context-manager.js';
+import { createLeaveNoteTool } from './tools/leave-note.js';
 
 export interface ToolCallInfo {
   toolName: string;
@@ -63,7 +65,14 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
         })
     : undefined;
 
-  const tools = getAllTools(config, embeddingModel, runSubagent);
+  // G: Shared notes store — populated by the leave_note tool during the run,
+  // injected into every subsequent step via compressMessages.
+  const agentNotes: string[] = [];
+
+  const tools = {
+    ...getAllTools(config, embeddingModel, runSubagent),
+    leave_note: createLeaveNoteTool(agentNotes),
+  };
   // Fix 2: capture registered tool names from the registry now, before the run starts.
   // event.activeTools in experimental_onStepStart is never populated by the Vercel AI SDK
   // for toolChoice:'auto' runs, so we derive it here from the actual registry instead.
@@ -129,6 +138,19 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
       tools,
       stopWhen: stepCountIs(config.maxSteps),
       toolChoice: 'auto',
+      // A + C + G: Before each LLM call, apply context compression:
+      //   - Compress old tool results (read_file → signatures+header, grep → matches only)
+      //   - Deduplicate overlapping file reads
+      //   - Trim reasoning text from old assistant messages (keep tool-call records)
+      //   - Inject agent scratchpad notes (from leave_note calls) at the top
+      // The SDK's internal history is unchanged; only the model's view is trimmed.
+      prepareStep: ({ stepNumber, messages }) => {
+        const compressed = compressMessages(messages as ModelMessage[], {
+          stepNumber,
+          agentNotes,
+        });
+        return { messages: compressed };
+      },
       experimental_onStepStart: (event) => {
         // Fix 3: event.system is empty because we inject the system prompt as a message
         // (to attach cacheControl). Extract it from messages[role=system] instead so the

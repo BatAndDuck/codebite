@@ -1,0 +1,422 @@
+/**
+ * Context Manager — compresses and prunes accumulated messages between agent steps.
+ *
+ * Hooks into `generateText({ prepareStep })` to return a trimmed view of the
+ * conversation before each LLM call. The SDK retains the full history internally;
+ * we only affect what the model sees, so no data is permanently lost.
+ *
+ * What it does each step:
+ *   A. Compress old tool results (read_file → signatures+header, grep → matches only)
+ *   C. Deduplicate overlapping file reads (subrange covered by a broader read → replaced)
+ *   G. Trim assistant reasoning text from old steps (keep tool-call records + [AGENT_NOTE:] text)
+ *   Notes: Inject leave_note scratchpad at the top of the conversation
+ *
+ * Trigger condition: step >= 4 AND (total tool-result bytes > 30 K OR step % 7 === 0)
+ * Recency window: last 2 steps are always kept verbatim.
+ */
+
+import type { ModelMessage } from 'ai';
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+/** Compress when accumulated tool-result chars exceed this (~7.5 K tokens). */
+const CHAR_THRESHOLD = 30_000;
+/** Also compress every N steps regardless of size (catches slow growth). */
+const COMPRESSION_INTERVAL = 7;
+/** Keep the most recent N steps verbatim; only compress older ones. */
+const RECENCY_WINDOW = 2;
+/** Don't start compressing until at least this many steps have run. */
+const MIN_STEPS = 4;
+/** Minimum line count for a read_file result to be worth compressing. */
+const FILE_COMPRESS_MIN_LINES = 60;
+
+// ─── Public types ────────────────────────────────────────────────────────────
+
+export interface CompressionOptions {
+  /** Current step number (1-based, from prepareStep's stepNumber param). */
+  stepNumber: number;
+  /** Notes accumulated via the leave_note tool during this run. */
+  agentNotes: string[];
+  charThreshold?: number;
+  compressionInterval?: number;
+  recencyWindow?: number;
+}
+
+// ─── Main export ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns a compressed copy of `messages` to pass to the LLM for this step.
+ * Called from `generateText({ prepareStep })` so the SDK's internal state
+ * remains untouched; only the model's view is trimmed.
+ */
+export function compressMessages(
+  messages: ModelMessage[],
+  options: CompressionOptions,
+): ModelMessage[] {
+  const {
+    stepNumber,
+    agentNotes,
+    charThreshold = CHAR_THRESHOLD,
+    compressionInterval = COMPRESSION_INTERVAL,
+    recencyWindow = RECENCY_WINDOW,
+  } = options;
+
+  const toolChars = countToolResultChars(messages);
+  const shouldCompress =
+    stepNumber >= MIN_STEPS &&
+    (toolChars > charThreshold || stepNumber % compressionInterval === 0);
+
+  let result: ModelMessage[] = [...messages];
+
+  if (shouldCompress) {
+    const compressBeforeStep = stepNumber - recencyWindow; // exclusive upper bound
+    const annotated = assignStepIndices(result);
+
+    result = annotated.map(({ msg, stepIndex }) => {
+      // Never touch system messages or recent messages
+      if (stepIndex === -1 || stepIndex >= compressBeforeStep) return msg;
+
+      if (msg.role === 'tool') return compressToolMessage(msg);
+      if (msg.role === 'assistant') return trimAssistantReasoning(msg);
+      return msg;
+    });
+
+    // C: Remove redundant file reads after compression
+    result = dedupeFileReads(result);
+  }
+
+  // Always inject notes so the model never loses them
+  if (agentNotes.length > 0) {
+    result = injectAgentNotes(result, agentNotes);
+  }
+
+  // Behavioural nudge: if the model has been drip-feeding (3+ consecutive single-tool
+  // assistant turns), inject a one-shot reminder so it batches the next round.
+  const drip = countTrailingSingleToolSteps(messages);
+  if (drip >= 3) {
+    result = injectBatchingReminder(result, drip);
+  }
+
+  return result;
+}
+
+function countTrailingSingleToolSteps(messages: ModelMessage[]): number {
+  let count = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const parts = Array.isArray(m.content) ? (m.content as any[]) : [];
+    const toolCalls = parts.filter((p) => p?.type === 'tool-call');
+    if (toolCalls.length === 1) count++;
+    else break;
+  }
+  return count;
+}
+
+function injectBatchingReminder(messages: ModelMessage[], drip: number): ModelMessage[] {
+  const text =
+    `[REMINDER — you have made ${drip} consecutive single-tool steps. ` +
+    `This drip-feeds the conversation and wastes 10–30k tokens per round-trip. ` +
+    `For your NEXT step: list every tool call you can predict needing now (independent reads, parallel greps, etc.) ` +
+    `and emit them ALL in one assistant turn as parallel tool_calls. ` +
+    `Only fall back to one call if the next action genuinely depends on what you're about to see.]`;
+
+  const firstNonSystem = messages.findIndex((m) => m.role !== 'system');
+  const pos = firstNonSystem === -1 ? messages.length : firstNonSystem;
+  const reminderTurn: ModelMessage[] = [
+    { role: 'user', content: text } as ModelMessage,
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Acknowledged — batching independent calls in the next step.' }],
+    } as ModelMessage,
+  ];
+  return [...messages.slice(0, pos), ...reminderTurn, ...messages.slice(pos)];
+}
+
+// ─── Step-index assignment ───────────────────────────────────────────────────
+
+interface MsgWithStep {
+  msg: ModelMessage;
+  /**
+   * Which step produced this message:
+   *  -1  = system (never compress)
+   *   0  = before step 1 (initial user message / history)
+   *   1  = step 1 output and its tool results
+   *   2  = step 2 …
+   */
+  stepIndex: number;
+}
+
+function assignStepIndices(messages: ModelMessage[]): MsgWithStep[] {
+  let step = 0;
+  return messages.map((msg) => {
+    if (msg.role === 'system') return { msg, stepIndex: -1 };
+    const current = step;
+    if (msg.role === 'assistant') step++;
+    return { msg, stepIndex: current };
+  });
+}
+
+// ─── Utility ─────────────────────────────────────────────────────────────────
+
+function countToolResultChars(messages: ModelMessage[]): number {
+  let total = 0;
+  for (const msg of messages) {
+    if (msg.role !== 'tool') continue;
+    const parts = Array.isArray(msg.content) ? (msg.content as any[]) : [];
+    for (const p of parts) {
+      if (p.type === 'tool-result') total += JSON.stringify(p.output ?? '').length;
+    }
+  }
+  return total;
+}
+
+// ─── A: Tool-result compression ──────────────────────────────────────────────
+
+function compressToolMessage(msg: ModelMessage): ModelMessage {
+  if (msg.role !== 'tool' || !Array.isArray(msg.content)) return msg;
+
+  const newContent = (msg.content as any[]).map((part) => {
+    if (part.type !== 'tool-result') return part;
+
+    // The Vercel AI SDK wraps tool outputs in { type: 'json', value: <actual> }
+    // (or { type: 'text', value: string }). Unwrap before compressing, then re-wrap.
+    const { rawOutput, wrapper } = unwrapOutput(part.output);
+
+    let compressed = rawOutput;
+    if (part.toolName === 'read_file') compressed = compressReadFileOutput(rawOutput);
+    else if (part.toolName === 'grep_search') compressed = compressGrepOutput(rawOutput);
+    // file_stats, semantic_search, dependency_analysis are already compact — keep as-is
+
+    return { ...part, output: wrapper ? { ...wrapper, value: compressed } : compressed };
+  });
+
+  return { ...msg, content: newContent };
+}
+
+/**
+ * The Vercel AI SDK serialises tool outputs as { type: 'json', value: <payload> }
+ * or { type: 'text', value: string }. Unwrap the payload so we can inspect it;
+ * return the wrapper shell separately so we can re-wrap after compression.
+ */
+function unwrapOutput(output: unknown): { rawOutput: unknown; wrapper: Record<string, unknown> | null } {
+  if (
+    output &&
+    typeof output === 'object' &&
+    'type' in (output as object) &&
+    'value' in (output as object)
+  ) {
+    const o = output as Record<string, unknown>;
+    if (o['type'] === 'json' || o['type'] === 'text') {
+      return { rawOutput: o['value'], wrapper: o };
+    }
+  }
+  return { rawOutput: output, wrapper: null };
+}
+
+function compressReadFileOutput(output: unknown): unknown {
+  if (!output || typeof output !== 'object') return output;
+  const o = output as Record<string, unknown>;
+  if (o['error'] || !o['content']) return output;
+
+  const rawContent = o['content'] as string;
+  const lines = rawContent.split('\n');
+  if (lines.length <= FILE_COMPRESS_MIN_LINES) return output; // small enough, keep
+
+  const kept = new Set<number>();
+
+  // Header: first 25 lines (imports, module docstring, top-level consts)
+  for (let i = 0; i < Math.min(25, lines.length); i++) kept.add(i);
+
+  // Footer: last 8 lines
+  for (let i = Math.max(0, lines.length - 8); i < lines.length; i++) kept.add(i);
+
+  // Signatures: declaration lines across major languages
+  const SIG_PATTERNS = [
+    // JS/TS
+    /^(export\s+)?(default\s+)?(async\s+)?(function|class|abstract\s+class|interface|type|enum)\s+\w/,
+    /^(export\s+)?(const|let|var)\s+\w+\s*[=:]/,
+    /^\s{0,6}(public|private|protected|static|readonly|override|async)(\s+(public|private|protected|static|readonly|override|async))*\s+\w+\s*[\(<]/,
+    // Python
+    /^(async\s+)?def\s+\w+\s*[\(:]/, /^class\s+\w+/,
+    // Go
+    /^func\s+/, /^type\s+\w+\s+struct/, /^type\s+\w+\s+interface/,
+    // Rust
+    /^(pub\s+)?(async\s+)?fn\s+\w+/, /^(pub\s+)?struct\s+\w+/, /^(pub\s+)?impl\b/,
+    // Java / C#
+    /^(public|private|protected|internal|static|abstract|override|virtual)(\s+\w+){1,4}\s*[\({]/,
+    // Ruby
+    /^\s*def\s+\w+/, /^\s*class\s+\w+/,
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trimStart();
+    if (SIG_PATTERNS.some((p) => p.test(t))) kept.add(i);
+  }
+
+  // Build output with gap markers
+  const sorted = [...kept].sort((a, b) => a - b);
+  const out: string[] = [];
+  let prev = -1;
+
+  for (const idx of sorted) {
+    if (prev !== -1 && idx > prev + 1) {
+      out.push(`// ... [${idx - prev - 1} lines omitted] ...`);
+    }
+    out.push(lines[idx]);
+    prev = idx;
+  }
+
+  if (prev < lines.length - 1) {
+    const tail = lines.length - 1 - prev;
+    if (tail > 0) out.push(`// ... [${tail} lines omitted] ...`);
+  }
+
+  return {
+    ...o,
+    content: out.join('\n'),
+    _compressed: `Showing ${sorted.length}/${lines.length} lines (signatures + header/footer). Use read_file with offset/limit for a full section.`,
+  };
+}
+
+function compressGrepOutput(output: unknown): unknown {
+  if (!output || typeof output !== 'object') return output;
+  const o = output as Record<string, unknown>;
+  if (o['error'] || !Array.isArray(o['matches'])) return output;
+
+  // Strip the `context` array (surrounding lines) — keep the matched line itself.
+  // Field names in grep_search output are: { file, line (number), content (matched text), context (array) }
+  const compressed = (o['matches'] as any[]).map((m) => ({
+    file: m.file,
+    line: m.line,
+    content: m.content,
+  }));
+
+  return {
+    ...o,
+    matches: compressed,
+    _compressed: 'Context lines stripped. Use read_file with offset/limit for surrounding code.',
+  };
+}
+
+// ─── C: Deduplicate overlapping file reads ────────────────────────────────────
+
+function dedupeFileReads(messages: ModelMessage[]): ModelMessage[] {
+  interface ReadRecord {
+    msgIdx: number;
+    partIdx: number;
+    fromLine: number; // 0-based inclusive
+    toLine: number;   // 0-based exclusive
+  }
+
+  // Pass 1: catalogue every read_file result
+  const byPath = new Map<string, ReadRecord[]>();
+
+  messages.forEach((msg, mi) => {
+    if (msg.role !== 'tool' || !Array.isArray(msg.content)) return;
+    (msg.content as any[]).forEach((part, pi) => {
+      if (part.type !== 'tool-result' || part.toolName !== 'read_file') return;
+      // Unwrap SDK envelope if present
+      const { rawOutput: o } = unwrapOutput(part.output);
+      if (!o || typeof o !== 'object') return;
+      const oo = o as Record<string, unknown>;
+      if (oo['error'] || oo['_deduped']) return;
+
+      const path: string = ((oo['path'] as string) ?? '').replace(/\\/g, '/');
+      const showing = oo['showing'] as Record<string, number> | undefined;
+      const from: number = (showing?.['from'] ?? 1) - 1; // convert 1-based → 0-based
+      const to: number = showing?.['to'] ?? (oo['totalLines'] as number) ?? from;
+      if (!byPath.has(path)) byPath.set(path, []);
+      byPath.get(path)!.push({ msgIdx: mi, partIdx: pi, fromLine: from, toLine: to });
+    });
+  });
+
+  // Pass 2: find redundant reads (covered by a later, broader read)
+  const redundant = new Set<string>(); // "msgIdx:partIdx"
+
+  for (const reads of byPath.values()) {
+    if (reads.length < 2) continue;
+    for (const ri of reads) {
+      for (const rj of reads) {
+        if (ri === rj) continue;
+        // rj is newer and covers ri entirely → ri is redundant
+        if (
+          rj.msgIdx > ri.msgIdx &&
+          rj.fromLine <= ri.fromLine &&
+          rj.toLine >= ri.toLine
+        ) {
+          redundant.add(`${ri.msgIdx}:${ri.partIdx}`);
+        }
+      }
+    }
+  }
+
+  if (redundant.size === 0) return messages;
+
+  // Pass 3: replace redundant parts with a slim placeholder
+  return messages.map((msg, mi) => {
+    if (msg.role !== 'tool' || !Array.isArray(msg.content)) return msg;
+
+    const newContent = (msg.content as any[]).map((part, pi) => {
+      if (!redundant.has(`${mi}:${pi}`)) return part;
+      const { rawOutput, wrapper } = unwrapOutput(part.output);
+      const oo = rawOutput && typeof rawOutput === 'object' ? rawOutput as Record<string, unknown> : {};
+      const dedupedPayload = {
+        _deduped: true,
+        path: oo['path'],
+        note: `[DEDUPED] ${oo['path']} is fully covered by a later read_file call — removed to save context.`,
+      };
+      return {
+        ...part,
+        output: wrapper ? { ...wrapper, value: dedupedPayload } : dedupedPayload,
+      };
+    });
+
+    return { ...msg, content: newContent };
+  });
+}
+
+// ─── G: Trim assistant reasoning ─────────────────────────────────────────────
+
+function trimAssistantReasoning(msg: ModelMessage): ModelMessage {
+  if (msg.role !== 'assistant') return msg;
+  const parts = Array.isArray(msg.content) ? (msg.content as any[]) : null;
+  if (!parts) return msg; // string content — leave alone
+
+  const kept = parts.filter((part) => {
+    if (part.type === 'tool-call') return true; // always keep (needed for tool-result correlation)
+    if (part.type === 'text') {
+      // Keep only text that contains an explicit agent note — discard chain-of-thought
+      return typeof part.text === 'string' && part.text.includes('[AGENT_NOTE:');
+    }
+    return true; // reasoning, redacted-reasoning, file parts — keep
+  });
+
+  if (kept.length === 0) {
+    return { ...msg, content: [{ type: 'text', text: '[reasoning trimmed]' }] };
+  }
+
+  return { ...msg, content: kept };
+}
+
+// ─── Notes injection ──────────────────────────────────────────────────────────
+
+function injectAgentNotes(messages: ModelMessage[], notes: string[]): ModelMessage[] {
+  const text =
+    `[AGENT SCRATCHPAD — notes saved via leave_note in earlier steps]\n` +
+    notes.map((n, i) => `${i + 1}. ${n}`).join('\n\n');
+
+  // Insert right after any system message(s), before the rest
+  const firstNonSystem = messages.findIndex((m) => m.role !== 'system');
+  const pos = firstNonSystem === -1 ? messages.length : firstNonSystem;
+
+  const notesTurn: ModelMessage[] = [
+    { role: 'user', content: text } as ModelMessage,
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Scratchpad noted. I will reference these facts as needed.' }],
+    } as ModelMessage,
+  ];
+
+  return [...messages.slice(0, pos), ...notesTurn, ...messages.slice(pos)];
+}

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { createGitignoreFilter } from '../utils/gitignore.js';
+import { formatSize } from '../utils/format-size.js';
 
 export const listDirectoryTool = tool({
   description:
@@ -64,8 +65,3 @@ export const listDirectoryTool = tool({
   },
 });
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}

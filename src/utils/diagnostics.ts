@@ -44,7 +44,12 @@ export function createDiagnosticsLogger(logPath: string): DiagnosticsLogger {
 }
 
 function appendJsonLine(filePath: string, payload: Record<string, unknown>): void {
-  appendFileSync(filePath, stringifySafe(payload) + '\n', 'utf-8');
+  try {
+    appendFileSync(filePath, stringifySafe(payload) + '\n', 'utf-8');
+  } catch {
+    // Diagnostics write failure must never crash the agent — silently swallow.
+    // Errors here could be a full disk, a permissions issue, or a bad path.
+  }
 }
 
 function stringifySafe(value: unknown): string {

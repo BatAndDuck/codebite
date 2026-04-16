@@ -233,6 +233,64 @@ export function getChatMessages(cwd: string = process.cwd()): ChatMessage[] {
   return getActiveChat(cwd)?.messages ?? [];
 }
 
+/**
+ * D: Build a history array suitable for the agent prompt.
+ *
+ * When the chat has more than `maxVerbatimTurns` user-assistant pairs, the
+ * oldest ones are replaced by a single compact summary turn so the model still
+ * understands the conversation arc without paying for every raw message.
+ *
+ * The last `maxVerbatimTurns - 1` exchanges are always kept verbatim.
+ */
+export function buildHistoryForPrompt(
+  messages: ChatMessage[],
+  maxVerbatimTurns = 8,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (messages.length === 0) return [];
+
+  // Group into user+assistant pairs
+  const pairs: Array<{ user: ChatMessage; assistant: ChatMessage }> = [];
+  for (let i = 0; i + 1 < messages.length; i += 2) {
+    if (messages[i].role === 'user' && messages[i + 1]?.role === 'assistant') {
+      pairs.push({ user: messages[i], assistant: messages[i + 1] });
+    }
+  }
+
+  if (pairs.length <= maxVerbatimTurns) {
+    // All turns fit — return them verbatim
+    return pairs.flatMap(({ user, assistant }) => [
+      { role: 'user' as const, content: user.content },
+      { role: 'assistant' as const, content: assistant.content },
+    ]);
+  }
+
+  // Summarise older turns; keep last (maxVerbatimTurns - 1) verbatim
+  const tailCount = maxVerbatimTurns - 1;
+  const headPairs = pairs.slice(0, pairs.length - tailCount);
+  const tailPairs = pairs.slice(pairs.length - tailCount);
+
+  const topics = headPairs
+    .map(({ user }) => user.content.slice(0, 80).replace(/\n/g, ' ').trim())
+    .join('; ');
+
+  const summaryContent =
+    `[Earlier conversation — ${headPairs.length} exchange(s) omitted to save context. ` +
+    `Topics covered: ${topics}]`;
+
+  return [
+    { role: 'user' as const, content: summaryContent },
+    {
+      role: 'assistant' as const,
+      content:
+        'Understood. I have the context of those earlier exchanges and will continue from where we left off.',
+    },
+    ...tailPairs.flatMap(({ user, assistant }) => [
+      { role: 'user' as const, content: user.content },
+      { role: 'assistant' as const, content: assistant.content },
+    ]),
+  ];
+}
+
 function normalizeChatSession(
   chat: z.infer<typeof rawChatSessionSchema>
 ): ChatSession {

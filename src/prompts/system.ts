@@ -43,7 +43,18 @@ export function buildSystemPrompt(
 
 - **Summarize as you go**: After reading a file or search results, mentally note the key findings. Don't try to memorize raw content.
 - **Be selective**: Only read files directly relevant to the question. A targeted grep is better than reading 10 files.
-- **Batch independent tool calls — never drip-feed**: Before issuing any step that contains only one tool call, explicitly ask: "Do I already know other searches or reads I will need after seeing this result?" If yes, issue them all in the same step. A single-tool step is only justified when the next action cannot be determined until the current result is seen (e.g. you need a file path from grep before you can read the file). Independent searches — grep, glob, dependency_analysis, semantic_search — must always be batched into one step, never spread across multiple sequential steps. Every extra round-trip re-sends the full conversation context (~10-30k tokens); batching is not optional.
+- **Batch independent tool calls in the SAME step — never drip-feed**: You can and MUST emit multiple tool calls in a single assistant turn whenever the calls do not depend on each other's results. The Vercel AI SDK supports parallel tool calls natively; emit them as multiple tool_calls in one turn and they will execute concurrently.
+  - **Hard rule — minimum batch sizes**:
+    - "Read N files I already know the path to" → ONE step with N read_file calls (not N steps).
+    - "Search for X concept" → ONE step with grep_search + glob_search + (semantic_search if available) + dependency_analysis if relevant.
+    - "Understand area Y" → ONE step with directory_tree(Y) + grep_search + the manifest read.
+  - **Forbidden anti-patterns** (every occurrence of these in your trajectory is a bug):
+    - 3+ consecutive single-call read_file steps for files whose paths you already know → MUST be one batched step.
+    - grep_search in step N followed by glob_search in step N+1 for the same concept → MUST be one step.
+    - Reading two files in sequence to "see what's in them" — if neither read depends on the other's result, batch.
+  - **Worked example — GOOD**: User asks "explain the ask command". Step 1 (parallel): \`read_file(src/cli.ts)\` + \`read_file(src/agent.ts)\` + \`read_file(src/tools/index.ts)\` + \`read_file(src/prompts/system.ts)\`. Done in 1 round-trip instead of 4.
+  - **Single-tool step is ONLY justified when**: the next action genuinely cannot be determined until the current result is seen (e.g. you need a file path from grep before you can read the file, or you need a function name from a read before you can grep for callers). If you can list multiple actions to take "after I see this", you have NOT justified a single-tool step — batch them with whatever you'd do next.
+  - **Cost reminder**: every extra round-trip re-sends the full conversation context (~10–30k tokens) AND adds latency. Batching is not optional, it is the primary lever for both speed and cost.
 - **Chunk large investigations**: Break complex questions into sub-questions and tackle each systematically.
 - **Track what you've found**: Keep a mental map of relevant files, functions, and patterns as you explore.
 
@@ -85,7 +96,16 @@ export function buildSystemPrompt(
 - folder_children: Use when you need only direct child folders/files of a directory
 - read_file_chunk: Prefer for targeted file slices to keep context compact
 - shell_command: Restricted to approved read-only commands such as "git log --oneline -20", "git blame <file>", "npm outdated", and "npm show <pkg> version"
-- dependency_analysis: "list-deps" for project dependencies, "trace-imports" for file-level imports${docsToolsSection ? `\n${docsToolsSection}` : ''}`;
+- dependency_analysis: "list-deps" for project dependencies, "trace-imports" for file-level imports
+- leave_note: Save a persistent note (file path, line number, key snippet, architectural fact) that survives context compression and is injected at the top of every future step.
+  - **MANDATORY in these situations** (call leave_note immediately, in the SAME step you discover the fact):
+    1. You found a key file path or function location you will likely revisit (e.g. "auth logic lives in src/auth/jwt.ts:45 — verifyToken()").
+    2. You confirmed a non-obvious architectural fact (e.g. "config.deepMode is set in cli.ts via --deep flag, defaults to false").
+    3. You discovered a data shape, return type, or contract you'll reason about later (e.g. "tool output is wrapped in {type:'json', value:...} by SDK").
+    4. You ruled something out and want to avoid re-checking (e.g. "no Redis usage anywhere — verified via grep + dependency_analysis").
+    5. The fact is something you would otherwise have to re-derive by re-reading files.
+  - Heuristic: if you'll need this fact MORE THAN 2 STEPS from now, leave a note. Old tool results get compressed; notes do not.
+  - Format: short, self-contained, includes file:line when applicable. Don't paraphrase — quote the exact identifier.${docsToolsSection ? `\n${docsToolsSection}` : ''}`;
 
   const initialQuestionSection = initialQuestion
     ? `\n\n## Initial User Request\n\n${initialQuestion}`

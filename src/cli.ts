@@ -7,6 +7,7 @@ import { runAgent, type AgentStepInfo } from './agent.js';
 import { buildIndex } from './indexer/index.js';
 import {
   appendChatTurn,
+  buildHistoryForPrompt,
   createChat,
   getActiveChat,
   listChats,
@@ -240,10 +241,9 @@ program
       const answer = await runAgent({
         model,
         question,
-        history: activeChat?.messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
+        // D: Sliding-window chat history — keeps the last 8 turns verbatim
+        // and replaces older turns with a compact summary to bound context growth.
+        history: activeChat ? buildHistoryForPrompt(activeChat.messages) : undefined,
         config: { ...config, maxSteps, deepMode },
         activeChatId: activeChat?.id ?? null,
         diagnosticsPath: diagPath,
