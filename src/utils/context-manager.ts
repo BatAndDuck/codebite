@@ -92,12 +92,76 @@ export function compressMessages(
 
   // Behavioural nudge: if the model has been drip-feeding (3+ consecutive single-tool
   // assistant turns), inject a one-shot reminder so it batches the next round.
-  const drip = countTrailingSingleToolSteps(messages);
-  if (drip >= 3) {
-    result = injectBatchingReminder(result, drip);
+  // Fix 5d: skip the nudge on final synthesis steps (no tool calls this turn) and
+  // when a spawn_subagents result is still being synthesised — those steps are
+  // answer-writing and don't need batching or note reminders.
+  if (!hasRecentSpawnSubagentsResult(messages)) {
+    const drip = countTrailingSingleToolSteps(messages);
+    if (drip >= 3) {
+      const stepsSinceNote = countStepsSinceLastNote(messages);
+      result = injectBatchingReminder(result, drip, stepsSinceNote);
+    }
+  }
+
+  // Fix 3a: when the most recent tool result is from spawn_subagents, inject a
+  // hard synthesis-lock message so the model writes the final answer instead of
+  // resuming exploration. Detection only fires on the step immediately after
+  // spawn_subagents returns (by design — see hasRecentSpawnSubagentsResult).
+  if (hasRecentSpawnSubagentsResult(messages)) {
+    result = injectSynthesisLock(result);
   }
 
   return result;
+}
+
+/**
+ * Fix 3a: returns true only when the MOST RECENT tool-message block contains a
+ * spawn_subagents result. After the model takes any other tool step, this flips
+ * back to false — so the synthesis lock fires exactly once, on the step
+ * immediately following spawn_subagents.
+ */
+function hasRecentSpawnSubagentsResult(messages: ModelMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'tool' || !Array.isArray(m.content)) continue;
+    const parts = m.content as any[];
+    if (parts.some((p) => p?.type === 'tool-result' && p?.toolName === 'spawn_subagents')) {
+      return true;
+    }
+    // Only examine the most recent tool-message block; any other tool result
+    // in between means spawn_subagents was not the latest signal.
+    return false;
+  }
+  return false;
+}
+
+function injectSynthesisLock(messages: ModelMessage[]): ModelMessage[] {
+  const text =
+    `[SYNTHESIS MODE — subagents have returned their findings above. ` +
+    `Your ONLY remaining task is to synthesize those results into one unified answer. ` +
+    `Do NOT call any more tools. Do NOT re-investigate what subagents already covered. ` +
+    `If their findings are insufficient, note the gap in your answer and explain what ` +
+    `additional investigation would require a separate --deep run. ` +
+    `Write the final answer now.]`;
+
+  // Insert just before the last user message — same recency-window position as
+  // the batching reminder (Fix 2a) so the lock lands in the model's attention.
+  let insertPos = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      insertPos = i;
+      break;
+    }
+  }
+
+  const turn: ModelMessage[] = [
+    { role: 'user', content: text } as ModelMessage,
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Understood. Synthesizing subagent findings now.' }],
+    } as ModelMessage,
+  ];
+  return [...messages.slice(0, insertPos), ...turn, ...messages.slice(insertPos)];
 }
 
 function countTrailingSingleToolSteps(messages: ModelMessage[]): number {
@@ -107,22 +171,78 @@ function countTrailingSingleToolSteps(messages: ModelMessage[]): number {
     if (m.role !== 'assistant') continue;
     const parts = Array.isArray(m.content) ? (m.content as any[]) : [];
     const toolCalls = parts.filter((p) => p?.type === 'tool-call');
+    // Fix 2c: lone leave_note steps are bookkeeping, not exploration drip-feed.
+    // Skip them so note-taking is not penalised by the batching reminder.
+    if (toolCalls.length === 1 && (toolCalls[0] as any).toolName === 'leave_note') continue;
     if (toolCalls.length === 1) count++;
     else break;
   }
   return count;
 }
 
-function injectBatchingReminder(messages: ModelMessage[], drip: number): ModelMessage[] {
-  const text =
-    `[REMINDER — you have made ${drip} consecutive single-tool steps. ` +
-    `This drip-feeds the conversation and wastes 10–30k tokens per round-trip. ` +
-    `For your NEXT step: list every tool call you can predict needing now (independent reads, parallel greps, etc.) ` +
-    `and emit them ALL in one assistant turn as parallel tool_calls. ` +
-    `Only fall back to one call if the next action genuinely depends on what you're about to see.]`;
+/**
+ * Fix 5c: Number of assistant steps since the most recent leave_note tool result.
+ * Returns the total assistant-step count when no leave_note has been called yet.
+ * Used to append a note-taking nudge to the batching reminder on long no-note runs.
+ */
+function countStepsSinceLastNote(messages: ModelMessage[]): number {
+  let steps = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'assistant') steps++;
+    if (m.role === 'tool' && Array.isArray(m.content)) {
+      const parts = m.content as any[];
+      if (parts.some((p) => p?.type === 'tool-result' && p?.toolName === 'leave_note')) {
+        return steps;
+      }
+    }
+  }
+  return steps;
+}
 
-  const firstNonSystem = messages.findIndex((m) => m.role !== 'system');
-  const pos = firstNonSystem === -1 ? messages.length : firstNonSystem;
+function injectBatchingReminder(
+  messages: ModelMessage[],
+  drip: number,
+  stepsSinceNote: number,
+): ModelMessage[] {
+  // Fix 2b: escalate reminder text based on drip length so the model feels
+  // increasing urgency across repeat firings rather than identical copy.
+  const severity =
+    drip >= 6 ? '⛔ HARD STOP — you are drip-feeding' :
+    drip >= 3 ? '⚠ BATCHING REQUIRED' :
+                'Reminder';
+  const tokenEstimate = drip > 5 ? '30k+' : '10–30k';
+
+  let text =
+    `[${severity} — ${drip} consecutive single-tool steps. ` +
+    `Every extra round-trip re-sends ${tokenEstimate} tokens. ` +
+    `Your NEXT step MUST list every tool call you can predict needing now ` +
+    `(independent reads, parallel greps, etc.) and emit them ALL in one assistant turn ` +
+    `as parallel tool_calls. Only fall back to one call if the next action genuinely ` +
+    `depends on what you're about to see.]`;
+
+  // Fix 5c: piggy-back a note-taking nudge onto the batching reminder when
+  // the run has been exploring without saving notes. Bundled here (rather than
+  // injected separately) to avoid reminder fatigue.
+  if (stepsSinceNote >= 5) {
+    text +=
+      `\n\n[Also: you have not called leave_note in ${stepsSinceNote}+ steps. ` +
+      `If you found any file paths, bug locations, or architectural facts, save them now — ` +
+      `batch leave_note with your next tool call.]`;
+  }
+
+  // Fix 2a: inject just before the most recent user message so the reminder
+  // lands in the model's recency window. The previous implementation inserted
+  // at firstNonSystem (near the beginning), which got buried once the
+  // conversation grew past ~20 messages.
+  let insertPos = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      insertPos = i;
+      break;
+    }
+  }
+
   const reminderTurn: ModelMessage[] = [
     { role: 'user', content: text } as ModelMessage,
     {
@@ -130,7 +250,7 @@ function injectBatchingReminder(messages: ModelMessage[], drip: number): ModelMe
       content: [{ type: 'text', text: 'Acknowledged — batching independent calls in the next step.' }],
     } as ModelMessage,
   ];
-  return [...messages.slice(0, pos), ...reminderTurn, ...messages.slice(pos)];
+  return [...messages.slice(0, insertPos), ...reminderTurn, ...messages.slice(insertPos)];
 }
 
 // ─── Step-index assignment ───────────────────────────────────────────────────

@@ -41,6 +41,14 @@ export function buildSystemPrompt(
 
 ## Context Efficiency Rules
 
+- **leave_note — save findings before they're compressed away**: Call \`leave_note\` **in the same step** you discover any of these (notes survive compression; raw tool results may not):
+    1. A key file path or function location you will read/reference again (e.g. \`leave_note("auth logic lives in src/auth/jwt.ts:45 — verifyToken()")\`).
+    2. A confirmed architectural fact (e.g. \`leave_note("config.deepMode is set in cli.ts via --deep flag, defaults to false")\`).
+    3. A data shape, return type, or contract you'll reason about later (e.g. \`leave_note("tool output is wrapped in {type:'json', value:...} by SDK")\`).
+    4. A ruled-out hypothesis (e.g. \`leave_note("no Redis usage anywhere — verified via grep + dependency_analysis")\`).
+    5. A bug or finding with a specific file:line (e.g. \`leave_note("race condition: chat.ts:150 — existsSync then writeFileSync")\`).
+  - **Never save notes in a dedicated solo step.** Always batch \`leave_note\` with the next tool call — e.g. found a file path in step N → emit \`leave_note\` + \`read_file\` together in step N.
+  - Heuristic: if you'll need this fact MORE THAN 2 STEPS from now, leave a note. Format: short, self-contained, includes file:line when applicable. Quote the exact identifier — don't paraphrase.
 - **Summarize as you go**: After reading a file or search results, mentally note the key findings. Don't try to memorize raw content.
 - **Be selective**: Only read files directly relevant to the question. A targeted grep is better than reading 10 files.
 - **Batch independent tool calls in the SAME step — never drip-feed**: You can and MUST emit multiple tool calls in a single assistant turn whenever the calls do not depend on each other's results. The Vercel AI SDK supports parallel tool calls natively; emit them as multiple tool_calls in one turn and they will execute concurrently.
@@ -52,7 +60,8 @@ export function buildSystemPrompt(
     - 3+ consecutive single-call read_file steps for files whose paths you already know → MUST be one batched step.
     - grep_search in step N followed by glob_search in step N+1 for the same concept → MUST be one step.
     - Reading two files in sequence to "see what's in them" — if neither read depends on the other's result, batch.
-  - **Worked example — GOOD**: User asks "explain the ask command". Step 1 (parallel): \`read_file(src/cli.ts)\` + \`read_file(src/agent.ts)\` + \`read_file(src/tools/index.ts)\` + \`read_file(src/prompts/system.ts)\`. Done in 1 round-trip instead of 4.
+    - \`leave_note\` as a solo step after the investigation is done → MUST be batched with whatever tool call comes next in the investigation (or the one that discovered the fact).
+  - **Worked example — GOOD**: User asks "explain the ask command". Step 1 (parallel): \`read_file(src/cli.ts)\` + \`read_file(src/agent.ts)\` + \`read_file(src/tools/index.ts)\` + \`read_file(src/prompts/system.ts)\`. Done in 1 round-trip instead of 4. After finding \`src/auth/jwt.ts\` via grep in step N → step N+1 emits \`leave_note("auth in src/auth/jwt.ts:45")\` + \`read_file("src/auth/jwt.ts")\` in parallel (NOT: grep → leave_note alone → read_file across three steps).
   - **Single-tool step is ONLY justified when**: the next action genuinely cannot be determined until the current result is seen (e.g. you need a file path from grep before you can read the file, or you need a function name from a read before you can grep for callers). If you can list multiple actions to take "after I see this", you have NOT justified a single-tool step — batch them with whatever you'd do next.
   - **Cost reminder**: every extra round-trip re-sends the full conversation context (~10–30k tokens) AND adds latency. Batching is not optional, it is the primary lever for both speed and cost.
 - **Chunk large investigations**: Break complex questions into sub-questions and tackle each systematically.
@@ -97,15 +106,8 @@ export function buildSystemPrompt(
 - read_file_chunk: Prefer for targeted file slices to keep context compact
 - shell_command: Restricted to approved read-only commands such as "git log --oneline -20", "git blame <file>", "npm outdated", and "npm show <pkg> version"
 - dependency_analysis: "list-deps" for project dependencies, "trace-imports" for file-level imports
-- leave_note: Save a persistent note (file path, line number, key snippet, architectural fact) that survives context compression and is injected at the top of every future step.
-  - **MANDATORY in these situations** (call leave_note immediately, in the SAME step you discover the fact):
-    1. You found a key file path or function location you will likely revisit (e.g. "auth logic lives in src/auth/jwt.ts:45 — verifyToken()").
-    2. You confirmed a non-obvious architectural fact (e.g. "config.deepMode is set in cli.ts via --deep flag, defaults to false").
-    3. You discovered a data shape, return type, or contract you'll reason about later (e.g. "tool output is wrapped in {type:'json', value:...} by SDK").
-    4. You ruled something out and want to avoid re-checking (e.g. "no Redis usage anywhere — verified via grep + dependency_analysis").
-    5. The fact is something you would otherwise have to re-derive by re-reading files.
-  - Heuristic: if you'll need this fact MORE THAN 2 STEPS from now, leave a note. Old tool results get compressed; notes do not.
-  - Format: short, self-contained, includes file:line when applicable. Don't paraphrase — quote the exact identifier.${docsToolsSection ? `\n${docsToolsSection}` : ''}`;
+- semantic_search: Find files by semantic meaning (purpose, concepts, integrations). **Availability:** this tool only appears in your tool list when the codebase index exists (\`.codebite-index/meta.json\` is present). If you do NOT see \`semantic_search\` in your available tools, the index has not been built — the tool is simply absent from the registry; it does not return an error when called, it cannot be called at all. Instruct the user to run \`codebite index\` if semantic discovery is needed.
+- leave_note: See "leave_note — save findings before they're compressed away" above under Context Efficiency Rules for the mandatory usage rules and batching requirement.${docsToolsSection ? `\n${docsToolsSection}` : ''}`;
 
   const initialQuestionSection = initialQuestion
     ? `\n\n## Initial User Request\n\n${initialQuestion}`

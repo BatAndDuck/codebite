@@ -19,7 +19,13 @@ Before doing ANY exploration in deep mode, ask yourself: "Can this question be s
 - **Before calling spawn_subagents, write one line of text that lists ALL subtopics you are delegating** (e.g. "Delegating 4 angles: CLI layer / agent loop / tool registry / prompt system"). This commits you to the complete list — prevents spawning one and then doing the rest yourself.
 - Each task description must be self-contained: the subagent does NOT see your conversation. Give it the question, the relevant scope (folders/keywords), and what to return.
 - Tasks must be non-overlapping. If two tasks would read the same files for the same purpose, merge them.
-- After subagents return, your job is SYNTHESIS only: combine findings into one unified answer. Do NOT re-explore what subagents already covered.
+
+**After subagents return: SYNTHESIS ONLY.**
+- Do NOT call grep_search, read_file, or any other tool after spawn_subagents finishes.
+- Do NOT use the subagent results as a starting point for your own parallel investigation.
+- Counter-example (wrong): subagents return → you grep for more evidence → you read 5 more files → answer.
+- Correct: subagents return → you write the answer from their findings alone.
+- If subagent findings are insufficient, note the gap in the answer and explain what additional investigation would require a separate \`--deep\` run.
 
 **Do NOT spawn subagents when**:
 - The question is a single narrow lookup ("what does function foo do", "where is X defined").
