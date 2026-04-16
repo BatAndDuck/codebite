@@ -239,6 +239,9 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
           totalUsage: event.totalUsage,
           finishReason: event.finishReason,
           finalText: event.text,
+          // Fix 1b: explicit flag so empty-response runs are queryable
+          // in diagnostics without having to parse finalText.
+          emptyResponse: !event.text || event.text.trim().length === 0,
         });
       },
     });
@@ -251,6 +254,26 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
       context: 'generateText threw an error',
     });
     throw err;
+  }
+
+  // Fix 1a: Guard against silent empty-response failures. The Vercel AI SDK can
+  // return an empty string when the model emits tool calls without producing a
+  // final text token, or when generation is interrupted. finishReason stays
+  // "stop" in this case, so diagnostics alone would not surface the issue.
+  // Auto-retry is NOT safe here — the model may have legitimately exhausted
+  // its step budget or be waiting on a tool result that never arrived. Fail
+  // loudly so the user can re-run with --max-steps or rephrase.
+  if (!result.text || result.text.trim().length === 0) {
+    const emptyErr = new Error(
+      'Agent produced no response text. The model may have stopped before writing an answer. ' +
+        'Try rephrasing the question or increasing --max-steps.',
+    );
+    diagnosticsLogger?.writeError({
+      timestamp: new Date().toISOString(),
+      error: { name: emptyErr.name, message: emptyErr.message, stack: emptyErr.stack },
+      context: 'Agent finished with empty text',
+    });
+    throw emptyErr;
   }
 
   return result.text;
