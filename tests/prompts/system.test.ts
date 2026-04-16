@@ -83,8 +83,9 @@ describe('buildSystemPrompt', () => {
 
     expect(prompt).toContain('Batch independent tool calls');
     expect(prompt).toContain('never drip-feed');
-    expect(prompt).toContain('A single-tool step is only justified');
-    expect(prompt).toContain('never spread across multiple sequential steps');
+    expect(prompt).toContain('Single-tool step is ONLY justified when');
+    expect(prompt).toContain('batch them with whatever you\'d do next');
+    expect(prompt).toContain('Cost reminder');
   });
 
   it('instructs to cross-reference dependency_analysis as a completeness check', () => {
