@@ -89,8 +89,9 @@ program
       console.log(chalk.dim(`  Model:    ${config.model}`));
       console.log(chalk.dim(`  Steps:    ${config.maxSteps}`));
       console.log(chalk.dim(`  Deep:     ${config.deepMode}`));
-      if (config.tools.tavilyApiKey) console.log(chalk.dim('  Search:   enabled'));
-      if (config.tools.context7ApiKey) console.log(chalk.dim('  Context7: enabled'));
+      console.log(chalk.dim('  API key  → .codebite.local.json (gitignored)'));
+      if (config.tools.tavilyApiKey) console.log(chalk.dim('  Search:   enabled (key → .codebite.local.json)'));
+      if (config.tools.context7ApiKey) console.log(chalk.dim('  Context7: enabled (key → .codebite.local.json)'));
       console.log(chalk.dim('\nRun "codebite index" to analyze and index your codebase.'));
     } catch (err: any) {
       console.error(chalk.red('Error:'), err.message);
@@ -217,13 +218,14 @@ program
     '--diagnostics [path]',
     'Write full diagnostics log (context, LLM responses, tool calls, errors) to a JSONL file (default under .codebite/diagnostics/)'
   )
+  .option('--fresh', 'Ignore active chat history for this query', false)
   .action(async (question, opts) => {
     try {
       const config = loadConfig();
       const model = resolveModel(config);
       const maxSteps = opts.maxSteps ? parseInt(opts.maxSteps, 10) : config.maxSteps;
       const deepMode = opts.deep ?? config.deepMode;
-      const activeChat = getActiveChat();
+      const activeChat = opts.fresh ? null : getActiveChat();
       const diagPath = resolveDiagnosticsPath(opts.diagnostics, activeChat?.id);
 
       warnIfIndexStale();
@@ -231,7 +233,15 @@ program
       console.log(chalk.bold.cyan('codebite') + ' — ' + chalk.dim(question));
       console.log(chalk.dim(`Provider: ${config.provider}  Model: ${config.model}  Max steps: ${maxSteps}${deepMode ? '  [deep mode]' : ''}`));
       if (activeChat) {
-        console.log(chalk.dim(`Chat: ${activeChat.name} (${activeChat.messages.length} saved messages)`));
+        if (activeChat.messages.length > 6) {
+          console.log(
+            chalk.yellow('⚠  Active chat:') +
+              ` ${activeChat.name} — ${activeChat.messages.length} saved messages will be included.` +
+              chalk.dim(' (use "codebite new" to start fresh, or pass --fresh)')
+          );
+        } else {
+          console.log(chalk.dim(`Chat: ${activeChat.name} (${activeChat.messages.length} messages)`));
+        }
       }
       if (diagPath) {
         console.log(chalk.dim(`Diagnostics: ${diagPath}`));

@@ -17,6 +17,7 @@ const ALLOWED_COMMANDS = [
   'npm outdated',
   'npm show',
   'npm view',
+  'npm ls',
   'wc',
   'du',
 ];

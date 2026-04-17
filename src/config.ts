@@ -173,20 +173,40 @@ export function saveConfig(
   });
 
   const configPath = getConfigPath(cwd);
-  const cleanedTools = Object.fromEntries(
-    Object.entries(full.tools).filter(([, value]) => value !== undefined)
-  );
+  // Secrets (apiKey, tavilyApiKey, context7ApiKey) are intentionally omitted —
+  // they're written to .codebite.local.json (gitignored) or read from env vars.
   const serialized = {
     provider: full.provider,
     model: full.model,
-    apiKey: full.apiKey,
     ...(full.baseURL ? { baseURL: full.baseURL } : {}),
     maxSteps: full.maxSteps,
     deepMode: full.deepMode,
     ...(full.disableSubagents ? { disableSubagents: true } : {}),
-    ...(Object.keys(cleanedTools).length > 0 ? { tools: cleanedTools } : {}),
   };
   writeFileSync(configPath, JSON.stringify(serialized, null, 2) + '\n', 'utf-8');
+
+  // Write secrets to .codebite.local.json (gitignored).
+  const localPath = join(cwd, LOCAL_CONFIG_FILENAME);
+  const existingLocal =
+    existsSync(localPath) && typeof parseJsonFile(localPath, LOCAL_CONFIG_FILENAME) === 'object'
+      ? (parseJsonFile(localPath, LOCAL_CONFIG_FILENAME) as Record<string, unknown>)
+      : {};
+  const existingLocalTools =
+    existingLocal['tools'] && typeof existingLocal['tools'] === 'object' && !Array.isArray(existingLocal['tools'])
+      ? (existingLocal['tools'] as Record<string, unknown>)
+      : {};
+  const mergedLocalTools: Record<string, unknown> = { ...existingLocalTools };
+  if (full.tools.tavilyApiKey) mergedLocalTools['tavilyApiKey'] = full.tools.tavilyApiKey;
+  if (full.tools.context7ApiKey) mergedLocalTools['context7ApiKey'] = full.tools.context7ApiKey;
+
+  const localSerialized: Record<string, unknown> = {
+    ...existingLocal,
+    apiKey: full.apiKey,
+  };
+  if (Object.keys(mergedLocalTools).length > 0) {
+    localSerialized['tools'] = mergedLocalTools;
+  }
+  writeFileSync(localPath, JSON.stringify(localSerialized, null, 2) + '\n', 'utf-8');
 
   return full;
 }

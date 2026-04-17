@@ -27,8 +27,14 @@ const COMPRESSION_INTERVAL = 7;
 const RECENCY_WINDOW = 2;
 /** Don't start compressing until at least this many steps have run. */
 const MIN_STEPS = 4;
-/** Minimum line count for a read_file result to be worth compressing. */
-const FILE_COMPRESS_MIN_LINES = 60;
+/**
+ * Minimum line count for a read_file result to be worth compressing.
+ * Raised from 60 → 200: at 60 the threshold fired on most source files,
+ * causing the model to re-read the same files in chunks after compression
+ * stripped their bodies. 200 keeps medium files intact and only compresses
+ * genuinely large ones.
+ */
+const FILE_COMPRESS_MIN_LINES = 200;
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -95,7 +101,7 @@ export function compressMessages(
   // Fix 5d: skip the nudge on final synthesis steps (no tool calls this turn) and
   // when a spawn_subagents result is still being synthesised — those steps are
   // answer-writing and don't need batching or note reminders.
-  if (!hasRecentSpawnSubagentsResult(messages)) {
+  if (!needsSynthesis(messages)) {
     const drip = countTrailingSingleToolSteps(messages);
     if (drip >= 3) {
       const stepsSinceNote = countStepsSinceLastNote(messages);
@@ -111,11 +117,11 @@ export function compressMessages(
     }
   }
 
-  // Fix 3a: when the most recent tool result is from spawn_subagents, inject a
-  // hard synthesis-lock message so the model writes the final answer instead of
-  // resuming exploration. Detection only fires on the step immediately after
-  // spawn_subagents returns (by design — see hasRecentSpawnSubagentsResult).
-  if (hasRecentSpawnSubagentsResult(messages)) {
+  // Fix 3a (revised): inject a hard synthesis-lock message whenever spawn_subagents
+  // has returned and the model has not yet produced a substantive text answer.
+  // This re-fires on every step until synthesis actually happens, preventing the
+  // model from escaping the lock by making another tool call.
+  if (needsSynthesis(messages)) {
     result = injectSynthesisLock(result);
   }
 
@@ -123,24 +129,31 @@ export function compressMessages(
 }
 
 /**
- * Fix 3a: returns true only when the MOST RECENT tool-message block contains a
- * spawn_subagents result. After the model takes any other tool step, this flips
- * back to false — so the synthesis lock fires exactly once, on the step
- * immediately following spawn_subagents.
+ * Returns true if spawn_subagents has been called in this run AND the model has
+ * not yet produced a substantive text response since then. "Substantive" = text
+ * content with >50 characters (not a tool-use preamble). The lock persists until
+ * actual synthesis is written, rather than firing only once immediately after
+ * spawn_subagents returns.
  */
-function hasRecentSpawnSubagentsResult(messages: ModelMessage[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== 'tool' || !Array.isArray(m.content)) continue;
-    const parts = m.content as any[];
-    if (parts.some((p) => p?.type === 'tool-result' && p?.toolName === 'spawn_subagents')) {
-      return true;
+function needsSynthesis(messages: ModelMessage[]): boolean {
+  let spawnSeen = false;
+  for (const m of messages) {
+    if (m.role === 'tool' && Array.isArray(m.content)) {
+      const parts = m.content as any[];
+      if (parts.some((p) => p?.type === 'tool-result' && p?.toolName === 'spawn_subagents')) {
+        spawnSeen = true;
+      }
     }
-    // Only examine the most recent tool-message block; any other tool result
-    // in between means spawn_subagents was not the latest signal.
-    return false;
+    if (spawnSeen && m.role === 'assistant') {
+      const parts = Array.isArray(m.content) ? (m.content as any[]) : [];
+      const textParts = parts.filter((p) => p.type === 'text');
+      const totalText = textParts.reduce((s: number, p: any) => s + (p.text?.length ?? 0), 0);
+      if (totalText > 50) {
+        spawnSeen = false; // model has synthesised — lock no longer needed
+      }
+    }
   }
-  return false;
+  return spawnSeen;
 }
 
 function injectSynthesisLock(messages: ModelMessage[]): ModelMessage[] {

@@ -26,8 +26,10 @@ export const grepSearchTool = tool({
     isRegex: z
       .boolean()
       .optional()
-      .default(false)
-      .describe('Treat pattern as regex'),
+      .describe(
+        'Force regex on (true) or off (false). ' +
+        'Default: auto-detect — patterns containing |, \\d, .*, [...], {n,m} etc. are treated as regex.'
+      ),
     maxResults: z
       .number()
       .int()
@@ -49,11 +51,24 @@ export const grepSearchTool = tool({
     const cwd = process.cwd();
     const ig = createGitignoreFilter(cwd);
 
+    // Auto-detect regex when isRegex is not explicitly set: patterns containing
+    // characters that only make sense as regex (alternation, escape sequences,
+    // wildcards, character classes, quantifier ranges) are treated as regex.
+    const looksLikeRegex = /[|\\]|\.\*|\.\+|\.\?|\[[^\]]+\]|\{[0-9,]+\}/.test(pattern);
+    const useRegex = isRegex ?? looksLikeRegex;
+
     let regex: RegExp;
     try {
-      regex = isRegex ? new RegExp(pattern, 'i') : new RegExp(escapeRegex(pattern), 'i');
+      regex = useRegex
+        ? new RegExp(pattern, 'i')
+        : new RegExp(escapeRegex(pattern), 'i');
     } catch (err: any) {
-      return { error: `Invalid regex pattern: ${err.message}` };
+      // Auto-detect guessed wrong (invalid regex) — fall back to literal match.
+      if (useRegex && isRegex === undefined) {
+        regex = new RegExp(escapeRegex(pattern), 'i');
+      } else {
+        return { error: `Invalid regex pattern: ${err.message}` };
+      }
     }
 
     try {

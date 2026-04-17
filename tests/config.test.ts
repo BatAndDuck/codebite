@@ -258,7 +258,7 @@ describe('saveConfig', () => {
     expect(config.maxSteps).toBe(50);
   });
 
-  it('saves nested tool config', () => {
+  it('saves nested tool config with secrets routed to .codebite.local.json', () => {
     const config = saveConfig(
       {
         provider: 'openai',
@@ -275,8 +275,27 @@ describe('saveConfig', () => {
     expect(config.tools.tavilyApiKey).toBe('tvly-test');
     expect(config.tools.context7ApiKey).toBe('ctx7-test');
 
+    // Secrets must not land in the committed .codebite.json
     const raw = JSON.parse(readFileSync(join(tempDir, '.codebite.json'), 'utf-8'));
-    expect(raw.tools.tavilyApiKey).toBe('tvly-test');
-    expect(raw.tools.context7ApiKey).toBe('ctx7-test');
+    expect(raw.apiKey).toBeUndefined();
+    expect(raw.tools).toBeUndefined();
+
+    // Secrets must be written to the gitignored .codebite.local.json instead
+    const local = JSON.parse(readFileSync(join(tempDir, '.codebite.local.json'), 'utf-8'));
+    expect(local.apiKey).toBe('sk-test');
+    expect(local.tools.tavilyApiKey).toBe('tvly-test');
+    expect(local.tools.context7ApiKey).toBe('ctx7-test');
+  });
+
+  it('never writes apiKey to .codebite.json', () => {
+    saveConfig(
+      { provider: 'openai', model: 'gpt-4o', apiKey: 'sk-secret' },
+      tempDir
+    );
+    const raw = JSON.parse(readFileSync(join(tempDir, '.codebite.json'), 'utf-8'));
+    expect(raw.apiKey).toBeUndefined();
+
+    const local = JSON.parse(readFileSync(join(tempDir, '.codebite.local.json'), 'utf-8'));
+    expect(local.apiKey).toBe('sk-secret');
   });
 });
