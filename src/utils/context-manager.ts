@@ -101,6 +101,14 @@ export function compressMessages(
       const stepsSinceNote = countStepsSinceLastNote(messages);
       result = injectBatchingReminder(result, drip, stepsSinceNote);
     }
+
+    // Nudge: solo leave_note step. The system prompt forbids leave_note as a solo
+    // step, but countTrailingSingleToolSteps skips lone leave_note turns (Fix 2c) so
+    // they never trigger the batching reminder. Fire a separate, targeted nudge instead.
+    const lastToolCalls = getLastAssistantToolCalls(messages);
+    if (lastToolCalls.length === 1 && lastToolCalls[0].toolName === 'leave_note') {
+      result = injectSoloNoteNudge(result);
+    }
   }
 
   // Fix 3a: when the most recent tool result is from spawn_subagents, inject a
@@ -251,6 +259,44 @@ function injectBatchingReminder(
     } as ModelMessage,
   ];
   return [...messages.slice(0, insertPos), ...reminderTurn, ...messages.slice(insertPos)];
+}
+
+/**
+ * Returns the tool-call parts from the most recent assistant message, or [] if
+ * there is no assistant message or it contains no tool calls.
+ */
+function getLastAssistantToolCalls(messages: ModelMessage[]): Array<{ toolName: string }> {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const parts = Array.isArray(m.content) ? (m.content as any[]) : [];
+    return parts.filter((p) => p?.type === 'tool-call');
+  }
+  return [];
+}
+
+function injectSoloNoteNudge(messages: ModelMessage[]): ModelMessage[] {
+  const text =
+    `[Note: you just used leave_note as a solo step. ` +
+    `Always batch leave_note with your next tool call — ` +
+    `e.g. leave_note + read_file in one step.]`;
+
+  let insertPos = messages.length;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      insertPos = i;
+      break;
+    }
+  }
+
+  const nudgeTurn: ModelMessage[] = [
+    { role: 'user', content: text } as ModelMessage,
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Understood — batching leave_note with the next tool call.' }],
+    } as ModelMessage,
+  ];
+  return [...messages.slice(0, insertPos), ...nudgeTurn, ...messages.slice(insertPos)];
 }
 
 // ─── Step-index assignment ───────────────────────────────────────────────────
