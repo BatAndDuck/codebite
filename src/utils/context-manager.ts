@@ -46,6 +46,12 @@ export interface CompressionOptions {
   charThreshold?: number;
   compressionInterval?: number;
   recencyWindow?: number;
+  /**
+   * Token-budget pressure from the capabilities layer.
+   * 'tight'    → lower MIN_STEPS threshold so compression starts sooner.
+   * 'critical' → also hard-truncate oldest steps beyond the recency window.
+   */
+  pressure?: 'ok' | 'tight' | 'critical';
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
@@ -65,12 +71,16 @@ export function compressMessages(
     charThreshold = CHAR_THRESHOLD,
     compressionInterval = COMPRESSION_INTERVAL,
     recencyWindow = RECENCY_WINDOW,
+    pressure = 'ok',
   } = options;
+
+  // Under tight/critical pressure compress from step 1 instead of waiting for MIN_STEPS.
+  const effectiveMinSteps = pressure === 'ok' ? MIN_STEPS : 1;
 
   const toolChars = countToolResultChars(messages);
   const shouldCompress =
-    stepNumber >= MIN_STEPS &&
-    (toolChars > charThreshold || stepNumber % compressionInterval === 0);
+    stepNumber >= effectiveMinSteps &&
+    (toolChars > charThreshold || stepNumber % compressionInterval === 0 || pressure !== 'ok');
 
   let result: ModelMessage[] = [...messages];
 
@@ -89,6 +99,12 @@ export function compressMessages(
 
     // C: Remove redundant file reads after compression
     result = dedupeFileReads(result);
+
+    // Under critical pressure, gut old tool-result payloads entirely.
+    // We keep the message shells (required by the SDK) but replace content with stubs.
+    if (pressure === 'critical') {
+      result = criticalCompressOldToolMessages(result, compressBeforeStep);
+    }
   }
 
   // Always inject notes so the model never loses them
@@ -333,6 +349,41 @@ function assignStepIndices(messages: ModelMessage[]): MsgWithStep[] {
     const current = step;
     if (msg.role === 'assistant') step++;
     return { msg, stepIndex: current };
+  });
+}
+
+// ─── Emergency compression for critical budget pressure ──────────────────────
+
+/**
+ * When budget pressure is 'critical', replace tool-result payloads from steps
+ * older than the recency window with a tiny placeholder.
+ * Dropping tool messages entirely would break the SDK's conversation structure
+ * (it requires a result for every assistant tool-call). We keep the message
+ * shell but gut the content to shed as many tokens as possible.
+ */
+function criticalCompressOldToolMessages(
+  messages: ModelMessage[],
+  compressBeforeStep: number,
+): ModelMessage[] {
+  const annotated = assignStepIndices(messages);
+  return annotated.map(({ msg, stepIndex }) => {
+    if (msg.role !== 'tool' || stepIndex === -1 || stepIndex >= compressBeforeStep) return msg;
+
+    // Replace each tool-result part with a minimal stub
+    const newContent = (msg.content as any[]).map((part) => {
+      if (part.type !== 'tool-result') return part;
+      const stub = {
+        _evicted: true,
+        note: `[Result evicted under critical budget pressure. Re-run the tool if needed.]`,
+      };
+      const { wrapper } = unwrapOutput(part.output);
+      return {
+        ...part,
+        output: wrapper ? { ...wrapper, value: stub } : stub,
+      };
+    });
+
+    return { ...msg, content: newContent };
   });
 }
 

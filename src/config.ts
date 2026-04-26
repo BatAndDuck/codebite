@@ -38,6 +38,13 @@ export const configSchema = z.object({
   deepMode: z.boolean().default(false),
   disableSubagents: z.boolean().default(false),
   tools: toolsConfigSchema.default({}),
+  /**
+   * Override the safe input budget (tokens) for this model.
+   * Useful for custom endpoints (LiteLLM, local models) where the registry
+   * doesn't have an entry and the conservative 6K default is too small or
+   * too large for the actual deployment.
+   */
+  safeInputBudgetOverride: z.number().int().min(1_000).optional(),
 });
 
 export type CodebiteConfig = z.infer<typeof configSchema>;

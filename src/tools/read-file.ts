@@ -10,16 +10,20 @@ import type { FileSummaryEntry } from '../utils/index-lookup.js';
 /**
  * Factory that creates the read_file tool.
  *
- * When `getIndexSummary` is provided (B), the result includes an `indexSummary`
- * field with pre-built purpose/exports/functions data from the vector index so
- * the agent gets semantic context without extra tool calls.
+ * `getIndexSummary` — when provided, enriches results with pre-built semantic
+ * context from the vector index (purpose, exports, functions).
+ *
+ * `defaultLimit` — max lines returned when the caller does not specify a limit.
+ * Defaults to 500; callers in the agent layer pass a tier-appropriate value
+ * (150 for small-tier models, 300 for medium) to keep tool results compact.
  */
 export function createReadFileTool(
   getIndexSummary?: (path: string) => FileSummaryEntry | null,
+  defaultLimit = 500,
 ) {
   return tool({
     description:
-      'Read the contents of a file with line numbers. For large files, use offset and limit to read specific sections. Check file-stats first for large files.',
+      `Read the contents of a file with line numbers. For large files, use offset and limit to read specific sections. Check file-stats first for large files.`,
     inputSchema: z.object({
       path: z.string().describe('File path relative to project root'),
       offset: z
@@ -35,8 +39,8 @@ export function createReadFileTool(
         .min(1)
         .max(1000)
         .optional()
-        .default(500)
-        .describe('Max lines to read (default 500, max 1000)'),
+        .default(defaultLimit)
+        .describe(`Max lines to read (default ${defaultLimit}, max 1000)`),
     }),
     execute: async ({ path: filePath, offset, limit }) => {
       const cwd = process.cwd();

@@ -14,14 +14,21 @@ const baseConfig: CodebiteConfig = {
 
 describe('buildSystemPrompt', () => {
   it('includes autonomy and fallback guidance', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Inspect the repo');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
 
     expect(prompt).toContain('Finish the task without bouncing it back');
     expect(prompt).toContain('Do not ask optional follow-ups');
     expect(prompt).toContain('Try a fallback path');
     expect(prompt).toContain('Handle every part of multi-part requests');
     expect(prompt).toContain('Full Repository Structure');
-    expect(prompt).toContain('Initial User Request');
+  });
+
+  it('does not embed the user question in the system prompt (no duplication)', () => {
+    const question = 'Inspect the repo and explain auth flow';
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
+
+    expect(prompt).not.toContain(question);
+    expect(prompt).not.toContain('Initial User Request');
   });
 
   it('includes documentation workflow guidance when context7 is configured', () => {
@@ -33,7 +40,6 @@ describe('buildSystemPrompt', () => {
         },
       },
       '├── src/\n└── tests/',
-      'Inspect the repo'
     );
 
     expect(prompt).toContain('Use docs before concluding');
@@ -45,33 +51,29 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(
       { ...baseConfig, deepMode: true },
       '├── src/\n└── tests/',
-      'Do an exhaustive investigation'
     );
 
     expect(prompt).toContain('spawn_subagents');
   });
 
   it('includes search efficiency and completeness rules', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Find all auth files');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
 
-    // Overlapping search merging
     expect(prompt).toContain('Merge overlapping searches');
-    // Enumeration completeness
     expect(prompt).toContain('Never stop at the first match for enumeration questions');
     expect(prompt).toContain('Final verification pass for enumeration answers');
-    // Dependency analysis as early signal
     expect(prompt).toContain('Use dependency_analysis early for integration questions');
   });
 
   it('requires semantic_search alongside grep for integration and concept questions', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Where is Redis used?');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
 
     expect(prompt).toContain('Mandatory semantic_search for integration and concept questions');
     expect(prompt).toContain('semantic_search MUST run in step 1 alongside grep_search');
   });
 
   it('instructs to trace indirect consumers via import patterns', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Which files use provider config?');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
 
     expect(prompt).toContain('Trace indirect consumers via imports');
     expect(prompt).toContain('indirect consumer');
@@ -79,7 +81,7 @@ describe('buildSystemPrompt', () => {
   });
 
   it('requires batching independent tool calls in a single step', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'Which files use Redis?');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
 
     expect(prompt).toContain('Batch independent tool calls');
     expect(prompt).toContain('never drip-feed');
@@ -89,11 +91,45 @@ describe('buildSystemPrompt', () => {
   });
 
   it('instructs to cross-reference dependency_analysis as a completeness check', () => {
-    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'List all Stripe integrations');
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
 
     expect(prompt).toContain('Cross-reference dependencies as a completeness check');
     expect(prompt).toContain('every declared dependency relevant to the topic');
     expect(prompt).toContain('investigate why');
+  });
+
+  it('does not contain codebite-specific example file paths', () => {
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/');
+
+    // The worked example must use generic paths, not codebite's own internal files
+    expect(prompt).not.toContain('explain the ask command');
+    expect(prompt).not.toContain('src/cli.ts');
+    expect(prompt).not.toContain('src/agent.ts');
+    expect(prompt).not.toContain('src/tools/index.ts');
+    expect(prompt).not.toContain('src/prompts/system.ts');
+  });
+
+  it('small tier prompt is substantially shorter than large tier', () => {
+    const small = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'small');
+    const large = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'large');
+
+    expect(small.length).toBeLessThan(large.length / 2);
+  });
+
+  it('small tier prompt omits project structure', () => {
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'small');
+
+    expect(prompt).not.toContain('Full Repository Structure');
+    // The structure content itself should not appear
+    expect(prompt).not.toContain('├── src/');
+  });
+
+  it('small tier still contains core instructions', () => {
+    const prompt = buildSystemPrompt(baseConfig, undefined, 'small');
+
+    expect(prompt).toContain('leave_note');
+    expect(prompt).toContain('Batch tool calls');
+    expect(prompt).toContain('Finish');
   });
 
   it('includes enumeration completeness reminder in execution prompt', () => {

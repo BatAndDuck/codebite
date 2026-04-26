@@ -14,6 +14,8 @@ import {
 } from './utils/diagnostics.js';
 import { compressMessages } from './utils/context-manager.js';
 import { createLeaveNoteTool } from './tools/leave-note.js';
+import { getCapabilities, READ_FILE_LIMIT_BY_TIER } from './models/capabilities.js';
+import { computeBudget } from './utils/token-budget.js';
 
 export interface ToolCallInfo {
   toolName: string;
@@ -44,6 +46,17 @@ export interface RunAgentOptions {
 export async function runAgent(options: RunAgentOptions): Promise<string> {
   const { model, question, config, history = [], diagnosticsPath, activeChatId, onStep } = options;
 
+  // Resolve per-model capabilities — drives prompt tier, step cap, output tokens, retries.
+  const capabilities = getCapabilities(config.provider, config.model, {
+    ...(config.safeInputBudgetOverride !== undefined
+      ? { safeInputBudget: config.safeInputBudgetOverride }
+      : {}),
+  });
+  const { tier } = capabilities;
+
+  // Cap maxSteps to what this model can practically handle.
+  const effectiveMaxSteps = Math.min(config.maxSteps, capabilities.recommendedMaxSteps);
+
   // Provide embedding model for semantic search when index exists
   const indexExists = existsSync(join(process.cwd(), INDEX_DIR_NAME, 'meta.json'));
 
@@ -69,18 +82,27 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
   // injected into every subsequent step via compressMessages.
   const agentNotes: string[] = [];
 
+  const readFileDefaultLimit = READ_FILE_LIMIT_BY_TIER[tier];
+
   const tools = {
-    ...getAllTools(config, embeddingModel, runSubagent),
+    ...getAllTools(config, embeddingModel, runSubagent, readFileDefaultLimit),
     leave_note: createLeaveNoteTool(agentNotes),
   };
-  // Fix 2: capture registered tool names from the registry now, before the run starts.
+  // Capture registered tool names from the registry now, before the run starts.
   // event.activeTools in experimental_onStepStart is never populated by the Vercel AI SDK
   // for toolChoice:'auto' runs, so we derive it here from the actual registry instead.
   const registeredToolNames = Object.keys(tools);
 
-  const projectStructure = getRepositoryStructure();
-  const systemPrompt = buildSystemPrompt(config, projectStructure, question);
+  // For small-tier models, include the project structure only if the budget allows.
+  // Large/medium tier always include it (same as before).
+  const fullProjectStructure = getRepositoryStructure();
+  const projectStructure = tier === 'small' ? undefined : fullProjectStructure;
+
+  // Layer 0 preflight: system prompt no longer embeds the question (that was a
+  // duplication — the question already appears in the user message via execution prompt).
+  const systemPrompt = buildSystemPrompt(config, projectStructure, tier);
   const executionPrompt = buildExecutionPrompt(question);
+
   const conversation: ModelMessage[] = [
     ...history.map((message) => ({
       role: message.role,
@@ -105,14 +127,20 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
     historyMessages: history.length,
     systemPrompt,
     initialMessages: conversation,
-    repositoryStructure: projectStructure,
-    registeredTools: registeredToolNames,   // Fix 2: full tool list at run start
+    repositoryStructure: fullProjectStructure,
+    registeredTools: registeredToolNames,
     config: {
       provider: config.provider,
       model: config.model,
-      maxSteps: config.maxSteps,
+      maxSteps: effectiveMaxSteps,
       deepMode: config.deepMode,
       disableSubagents: config.disableSubagents,
+    },
+    capabilities: {
+      tier,
+      safeInputBudget: capabilities.safeInputBudget,
+      maxOutputTokens: capabilities.maxOutputTokens,
+      recommendedMaxSteps: capabilities.recommendedMaxSteps,
     },
   });
 
@@ -120,9 +148,11 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
   try {
     result = await generateText({
       model,
+      maxOutputTokens: capabilities.maxOutputTokens,
+      maxRetries: capabilities.maxRetries,
       // System prompt is passed as a message (not top-level `system`) so we can attach
       // Anthropic `cacheControl: ephemeral` — lets Anthropic/Vercel-gateway reuse the
-      // ~2k-token system prompt across steps (and across runs within the 5-min TTL)
+      // system prompt across steps (and across runs within the 5-min TTL)
       // instead of paying for it every call. Providers that don't understand this field
       // silently ignore it, so it's safe across all 14 supported providers.
       messages: [
@@ -136,23 +166,21 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
         ...conversation,
       ],
       tools,
-      stopWhen: stepCountIs(config.maxSteps),
+      stopWhen: stepCountIs(effectiveMaxSteps),
       toolChoice: 'auto',
-      // A + C + G: Before each LLM call, apply context compression:
-      //   - Compress old tool results (read_file → signatures+header, grep → matches only)
-      //   - Deduplicate overlapping file reads
-      //   - Trim reasoning text from old assistant messages (keep tool-call records)
-      //   - Inject agent scratchpad notes (from leave_note calls) at the top
+      // Before each LLM call: compute token-budget pressure, then apply context compression.
       // The SDK's internal history is unchanged; only the model's view is trimmed.
       prepareStep: ({ stepNumber, messages }) => {
+        const budget = computeBudget(capabilities, messages as ModelMessage[]);
         const compressed = compressMessages(messages as ModelMessage[], {
           stepNumber,
           agentNotes,
+          pressure: budget.pressure,
         });
         return { messages: compressed };
       },
       experimental_onStepStart: (event) => {
-        // Fix 3: event.system is empty because we inject the system prompt as a message
+        // event.system is empty because we inject the system prompt as a message
         // (to attach cacheControl). Extract it from messages[role=system] instead so the
         // log always has a populated `system` field, and keep only conversation messages
         // in `messages` (cleaner separation in the log).
@@ -166,9 +194,9 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
           stepNumber: event.stepNumber + 1,
           startedAt: new Date().toISOString(),
           startedAtMs: Date.now(),
-          system: systemContent,           // Fix 3: extracted from messages, never empty
-          messages: conversationMessages,  // Fix 3: system-stripped conversation only
-          activeTools: registeredToolNames, // Fix 2: from registry, always populated
+          system: systemContent,
+          messages: conversationMessages,
+          activeTools: registeredToolNames,
           toolChoice: event.toolChoice,
         };
         stepInputs.set(event.stepNumber, snapshot);
@@ -239,8 +267,6 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
           totalUsage: event.totalUsage,
           finishReason: event.finishReason,
           finalText: event.text,
-          // Fix 1b: explicit flag so empty-response runs are queryable
-          // in diagnostics without having to parse finalText.
           emptyResponse: !event.text || event.text.trim().length === 0,
         });
       },
@@ -256,13 +282,11 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
     throw err;
   }
 
-  // Fix 1a: Guard against silent empty-response failures. The Vercel AI SDK can
-  // return an empty string when the model emits tool calls without producing a
-  // final text token, or when generation is interrupted. finishReason stays
-  // "stop" in this case, so diagnostics alone would not surface the issue.
-  // Auto-retry is NOT safe here — the model may have legitimately exhausted
-  // its step budget or be waiting on a tool result that never arrived. Fail
-  // loudly so the user can re-run with --max-steps or rephrase.
+  // Guard against silent empty-response failures. The Vercel AI SDK can return an
+  // empty string when the model emits tool calls without producing a final text token,
+  // or when generation is interrupted. finishReason stays "stop" in this case.
+  // Auto-retry is NOT safe here — the model may have legitimately exhausted its step
+  // budget. Fail loudly so the user can re-run with more steps or rephrase.
   if (!result.text || result.text.trim().length === 0) {
     const emptyErr = new Error(
       'Agent produced no response text. The model may have stopped before writing an answer. ' +

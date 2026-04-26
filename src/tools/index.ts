@@ -20,7 +20,8 @@ import { createSpawnSubagentsTool } from './spawn-subagents.js';
 export function getAllTools(
   config: CodebiteConfig,
   embeddingModel?: EmbeddingModel,
-  runSubagent?: (task: string) => Promise<string>
+  runSubagent?: (task: string) => Promise<string>,
+  readFileDefaultLimit?: number,
 ) {
   // B: Load index summaries once and wire into read_file so every file read
   // automatically gets the pre-built semantic context prepended.
@@ -30,7 +31,7 @@ export function getAllTools(
     : undefined;
 
   const tools: Record<string, any> = {
-    'read_file': createReadFileTool(getSummary),
+    'read_file': createReadFileTool(getSummary, readFileDefaultLimit),
     'read_file_chunk': readFileChunkTool,
     'glob_search': globSearchTool,
     'grep_search': grepSearchTool,
