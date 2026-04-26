@@ -59,12 +59,12 @@ const REGISTRY: Record<string, Partial<ModelCapabilities>> = {
   // ── DeepSeek (direct) ────────────────────────────────────────────────────────
   'deepseek/deepseek-chat':               { contextWindow: 64_000,  safeInputBudget: 24_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 20, tier: 'medium', maxRetries: 3 },
   'deepseek/deepseek-reasoner':           { contextWindow: 64_000,  safeInputBudget: 24_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 15, tier: 'medium', maxRetries: 3 },
-  // ── DeepSeek through Vercel gateway — conservative due to timeout risk ───────
-  'vercel/deepseek/deepseek-chat':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 2_048, reservedOutput: 2_048, recommendedMaxSteps: 15, tier: 'medium', maxRetries: 3 },
-  'vercel/deepseek/deepseek-v3':          { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 2_048, reservedOutput: 2_048, recommendedMaxSteps: 15, tier: 'medium', maxRetries: 3 },
-  'vercel/deepseek/deepseek-v3.1':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 2_048, reservedOutput: 2_048, recommendedMaxSteps: 15, tier: 'medium', maxRetries: 3 },
-  'vercel/deepseek/deepseek-v3.2':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 2_048, reservedOutput: 2_048, recommendedMaxSteps: 15, tier: 'medium', maxRetries: 3 },
-  'vercel/deepseek/deepseek-r1':          { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 2_048, reservedOutput: 2_048, recommendedMaxSteps: 15, tier: 'medium', maxRetries: 3 },
+  // ── DeepSeek through Vercel gateway — conservative input budget due to timeout risk ──
+  'vercel/deepseek/deepseek-chat':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
+  'vercel/deepseek/deepseek-v3':          { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
+  'vercel/deepseek/deepseek-v3.1':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
+  'vercel/deepseek/deepseek-v3.2':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
+  'vercel/deepseek/deepseek-r1':          { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
   // ── Vercel gateway — OpenAI models ───────────────────────────────────────────
   'vercel/openai/gpt-4o':                 { contextWindow: 128_000, safeInputBudget: 80_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'large',  maxRetries: 2 },
   'vercel/openai/gpt-4o-mini':            { contextWindow: 128_000, safeInputBudget: 60_000,  maxOutputTokens: 4_096, reservedOutput: 2_048, recommendedMaxSteps: 30, tier: 'large',  maxRetries: 2 },

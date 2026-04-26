@@ -1,6 +1,6 @@
 {
   "name": "codebite",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Agentic codebase analysis CLI — explore, understand, and analyze any codebase using LLM agents",
   "type": "module",
   "bin": {

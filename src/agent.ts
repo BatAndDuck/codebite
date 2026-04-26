@@ -54,8 +54,10 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
   });
   const { tier } = capabilities;
 
-  // Cap maxSteps to what this model can practically handle.
-  const effectiveMaxSteps = Math.min(config.maxSteps, capabilities.recommendedMaxSteps);
+  // Use config.maxSteps directly — callers set it intentionally and the budget-pressure
+  // system handles context growth through compression, not by capping steps.
+  // recommendedMaxSteps in the registry is advisory (surfaced in diagnostics) only.
+  const effectiveMaxSteps = config.maxSteps;
 
   // Provide embedding model for semantic search when index exists
   const indexExists = existsSync(join(process.cwd(), INDEX_DIR_NAME, 'meta.json'));
