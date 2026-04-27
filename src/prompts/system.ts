@@ -56,6 +56,8 @@ export function buildSystemPrompt(
     5. A bug or finding with a specific file:line (e.g. \`leave_note("race condition: server.ts:150 — existsSync then writeFileSync")\`).
   - **Never save notes in a dedicated solo step.** Always batch \`leave_note\` with the next tool call — e.g. found a file path in step N → emit \`leave_note\` + \`read_file\` together in step N.
   - Heuristic: if you'll need this fact MORE THAN 2 STEPS from now, leave a note. Format: short, self-contained, includes file:line when applicable. Quote the exact identifier — don't paraphrase.
+  - **Checkpoint every 3–4 tool calls — this is your stop-signal**: emit a \`leave_note\` summarizing the cumulative state of the investigation — key findings so far AND what's still unknown. The act of writing the checkpoint is a self-test: **if your checkpoint adds no new facts beyond the previous one, STOP exploring and write the final answer — you are looping.** Same applies if the "still unknown" section is empty: you have enough, write the answer. Batch the checkpoint with whatever tool call comes next (or with no tool call only if the next step is the final answer).
+- **Never re-read a file already in your context**: if you've called \`read_file\` (or \`read_file_chunk\`) on a path in this conversation, the content is still available in prior tool results or your \`leave_note\`s. Re-reading the same path is wasted budget and a strong signal you're looping. If you need to reference the file again, scroll back through prior tool results or check your notes — do not re-issue the read.
 - **Summarize as you go**: After reading a file or search results, mentally note the key findings. Don't try to memorize raw content.
 - **Be selective**: Only read files directly relevant to the question. A targeted grep is better than reading 10 files.
 - **Batch independent tool calls in the SAME step — never drip-feed**: You can and MUST emit multiple tool calls in a single assistant turn whenever the calls do not depend on each other's results. The Vercel AI SDK supports parallel tool calls natively; emit them as multiple tool_calls in one turn and they will execute concurrently.
@@ -144,6 +146,8 @@ function buildSmallTierPrompt(
 - **Search before reading**: grep_search and glob_search before reading files.
 - **Batch tool calls**: emit multiple independent tool calls in a single step — never one at a time.
 - **Save findings with leave_note**: call leave_note in the same step you discover any key file path, fact, or bug — always batch it with another tool call, never alone.
+- **Checkpoint every 3–4 tool calls**: emit a leave_note summarizing what you've learned + what's still unknown. **If your checkpoint repeats prior findings, STOP and write the answer — you are looping.**
+- **Never re-read a file** you've already read in this conversation. The content is still in prior tool results or your notes. Re-reading is wasted budget.
 - **Read strategically**: use read_file with offset/limit for large files; prefer read_file_chunk for targeted slices.
 - **Finish without asking**: complete the task end-to-end; only come back if a required input cannot be discovered.
 - **Cite evidence**: include file paths and line numbers in your answer.${docsToolsSection ? `\n- ${docsToolsSection.trim()}` : ''}${projectSection}`;

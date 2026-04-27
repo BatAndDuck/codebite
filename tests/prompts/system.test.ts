@@ -132,6 +132,29 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Finish');
   });
 
+  it('large tier instructs to checkpoint every 3–4 tool calls and stop on repeats', () => {
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'large');
+
+    expect(prompt).toContain('Checkpoint every 3–4 tool calls');
+    expect(prompt).toContain('STOP exploring and write the final answer');
+    expect(prompt).toContain('you are looping');
+  });
+
+  it('large tier forbids re-reading files already in context', () => {
+    const prompt = buildSystemPrompt(baseConfig, '├── src/\n└── tests/', 'large');
+
+    expect(prompt).toContain('Never re-read a file already in your context');
+    expect(prompt).toContain('do not re-issue the read');
+  });
+
+  it('small tier includes the checkpoint and never-re-read rules', () => {
+    const prompt = buildSystemPrompt(baseConfig, undefined, 'small');
+
+    expect(prompt).toContain('Checkpoint every 3–4 tool calls');
+    expect(prompt).toContain('STOP and write the answer');
+    expect(prompt).toContain('Never re-read a file');
+  });
+
   it('includes enumeration completeness reminder in execution prompt', () => {
     const prompt = buildExecutionPrompt('Which files handle authentication?');
 

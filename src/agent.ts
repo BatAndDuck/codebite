@@ -179,7 +179,16 @@ export async function runAgent(options: RunAgentOptions): Promise<string> {
           agentNotes,
           pressure: budget.pressure,
         });
-        return { messages: compressed };
+        // Force text-only synthesis when the step budget is almost exhausted.
+        // With ≤2 steps remaining the model cannot call more tools, so it must
+        // write the final answer. This is a safety net for models that loop on
+        // tool calls and never produce a response text before hitting stopWhen.
+        const stepsRemaining = effectiveMaxSteps - stepNumber;
+        const forceSynthesis = stepsRemaining <= 2;
+        return {
+          messages: compressed,
+          ...(forceSynthesis ? { toolChoice: 'none' as const } : {}),
+        };
       },
       experimental_onStepStart: (event) => {
         // event.system is empty because we inject the system prompt as a message
