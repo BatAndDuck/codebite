@@ -360,6 +360,17 @@ function assignStepIndices(messages: ModelMessage[]): MsgWithStep[] {
  * Dropping tool messages entirely would break the SDK's conversation structure
  * (it requires a result for every assistant tool-call). We keep the message
  * shell but gut the content to shed as many tokens as possible.
+ *
+ * Output is always emitted as `{ type: 'json', value: stub }` — a shape every
+ * recent SDK / Vercel AI Gateway version accepts. We deliberately do NOT preserve
+ * the original wrapper:
+ *   - if the original was `{ type: 'text', value: string }`, spreading it and
+ *     overriding `value` with our object stub would produce an invalid
+ *     `{ type: 'text', value: object }` payload (gateway 400).
+ *   - if the original used any wrapper type our `unwrapOutput` does not
+ *     recognise (e.g. `error-json`, `content`), `wrapper` is null and we'd
+ *     emit a bare stub with no `type` field at all (gateway 400).
+ * Forcing `json` here keeps the shape canonical for every tool.
  */
 function criticalCompressOldToolMessages(
   messages: ModelMessage[],
@@ -376,10 +387,9 @@ function criticalCompressOldToolMessages(
         _evicted: true,
         note: `[Result evicted under critical budget pressure. Re-run the tool if needed.]`,
       };
-      const { wrapper } = unwrapOutput(part.output);
       return {
         ...part,
-        output: wrapper ? { ...wrapper, value: stub } : stub,
+        output: { type: 'json', value: stub },
       };
     });
 
@@ -589,16 +599,18 @@ function dedupeFileReads(messages: ModelMessage[]): ModelMessage[] {
 
     const newContent = (msg.content as any[]).map((part, pi) => {
       if (!redundant.has(`${mi}:${pi}`)) return part;
-      const { rawOutput, wrapper } = unwrapOutput(part.output);
+      const { rawOutput } = unwrapOutput(part.output);
       const oo = rawOutput && typeof rawOutput === 'object' ? rawOutput as Record<string, unknown> : {};
       const dedupedPayload = {
         _deduped: true,
         path: oo['path'],
         note: `[DEDUPED] ${oo['path']} is fully covered by a later read_file call — removed to save context.`,
       };
+      // Always emit `{ type: 'json', value: ... }`. See criticalCompressOldToolMessages
+      // for why we do not preserve the original wrapper here (gateway schema strictness).
       return {
         ...part,
-        output: wrapper ? { ...wrapper, value: dedupedPayload } : dedupedPayload,
+        output: { type: 'json', value: dedupedPayload },
       };
     });
 
