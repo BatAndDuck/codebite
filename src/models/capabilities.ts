@@ -64,7 +64,11 @@ const REGISTRY: Record<string, Partial<ModelCapabilities>> = {
   'vercel/deepseek/deepseek-v3':          { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
   'vercel/deepseek/deepseek-v3.1':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
   'vercel/deepseek/deepseek-v3.2':        { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
+  'vercel/deepseek/deepseek-v3.2-thinking': { contextWindow: 64_000, safeInputBudget: 18_000, maxOutputTokens: 8_192, reservedOutput: 8_192, recommendedMaxSteps: 30, tier: 'medium', maxRetries: 3 },
+  'vercel/deepseek/deepseek-v4-flash':    { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
   'vercel/deepseek/deepseek-r1':          { contextWindow: 64_000,  safeInputBudget: 18_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'medium', maxRetries: 3 },
+  // ── MiniMax through Vercel gateway ──────────────────────────────────────────
+  'vercel/minimax/minimax-m2.5':          { contextWindow: 40_960,  safeInputBudget: 24_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 35, tier: 'medium', maxRetries: 2 },
   // ── Vercel gateway — OpenAI models ───────────────────────────────────────────
   'vercel/openai/gpt-4o':                 { contextWindow: 128_000, safeInputBudget: 80_000,  maxOutputTokens: 4_096, reservedOutput: 4_096, recommendedMaxSteps: 40, tier: 'large',  maxRetries: 2 },
   'vercel/openai/gpt-4o-mini':            { contextWindow: 128_000, safeInputBudget: 60_000,  maxOutputTokens: 4_096, reservedOutput: 2_048, recommendedMaxSteps: 30, tier: 'large',  maxRetries: 2 },
