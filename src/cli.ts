@@ -35,7 +35,7 @@ program
     'Model ID — either "gpt-4o" (with --provider) or "openai/gpt-4o" shorthand'
   )
   .requiredOption('--apikey <key>', 'API key for the LLM provider')
-  .option('--base-url <url>', 'Custom base URL (required for litellm; optional for azure and openai-compatible endpoints)')
+  .option('--base-url <url>', 'Custom base URL (optional for litellm; defaults to http://localhost:4000)')
   .option('--tavily-key <key>', 'Tavily API key for web search')
   .option('--context7-key <key>', 'Context7 API key for documentation lookup via MCP')
   .option('--max-steps <n>', 'Maximum agent steps', '30')

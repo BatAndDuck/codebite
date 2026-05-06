@@ -6,7 +6,7 @@ All LLM calls go through the [Vercel AI SDK](https://sdk.vercel.ai/docs) regardl
 
 ## Features
 
-- **Multi-provider LLM support** — OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway
+- **Multi-provider LLM support** — 14 providers including OpenAI, Anthropic, Google, Vercel AI Gateway, and LiteLLM
 - **Smart agentic loop** — agent takes as many steps as needed, uses tools in parallel
 - **Deep indexing** — LLM analyzes each file to extract purpose, per-function summaries, external service integrations, and dependencies — stored in a vector DB for semantic search
 - **Built-in analysis tools** — chunked file reads, child-folder inspection, dependency analysis, git history, semantic search, web search, and Context7 docs lookup
@@ -169,7 +169,7 @@ codebite init \
   --provider openai \         # provider name (see docs/providers.md)
   --model gpt-4o \            # model ID
   [--apikey sk-...] \         # LLM API key (prefer .codebite.local.json instead)
-  [--base-url https://...] \  # optional: custom base URL (litellm, azure)
+  [--base-url https://...] \  # optional: custom base URL (LiteLLM defaults to http://localhost:4000)
   [--tavily-key tvly-...] \   # optional: enable web search
   [--context7-key ctx7-...] \ # optional: enable Context7 MCP docs lookup
   [--max-steps 50] \          # optional: override default 30

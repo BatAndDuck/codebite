@@ -3,3 +3,4 @@
 # Followup: append +YYYY-MM-DD <note> to the existing line
 
 2026-04-15 | quirky-cerf | Added session log and versioning rules to AGENTS.md. Introduced .ai-sessions-log to track AI session history, prevent repeated mistakes, and enforce changelog+version bump discipline before npm releases.
+2026-05-06 | main/litellm-release | Added 0.7.5 changelog/version bump and clarified LiteLLM base-url help so the npm package can publish with default proxy support documented.
